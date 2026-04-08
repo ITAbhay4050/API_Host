@@ -7,17 +7,13 @@ import { AuthProvider } from "@/context/AuthContext";
 import PrivateRoute from "@/components/PrivateRoute";
 import { UserRole } from "@/types";
 
-// -----------------------------------------------------------------------------
 // Auth Pages
-// -----------------------------------------------------------------------------
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import DealerRegister from "./pages/Dealerregister";
 import Unauthorized from "./pages/Unauthorized";
 
-// -----------------------------------------------------------------------------
 // Dashboard + Feature Pages
-// -----------------------------------------------------------------------------
 import Dashboard from "./pages/Dashboard";
 import MachineInstallation from "./pages/MachineInstallation";
 import Machines from "./pages/Machines";
@@ -29,27 +25,18 @@ import Dealers from "./pages/Dealers";
 import Users from "./pages/Users";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
-import DealerStock from "./pages/DealerStock";   // <-- New import
+import DealerStock from "./pages/DealerStock";
+import Purchaseorder from "./pages/Purchaseorder";   // ✅ already imported
 
-// -----------------------------------------------------------------------------
-// React‑Query Client
-// -----------------------------------------------------------------------------
 const queryClient = new QueryClient();
-
-// -----------------------------------------------------------------------------
-// App Component
-// -----------------------------------------------------------------------------
 
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <TooltipProvider>
-          {/* Global Toast Components */}
           <Toaster />
           <Sonner />
-
-          {/* Routes */}
           <BrowserRouter>
             <Routes>
               {/* Public Routes */}
@@ -57,13 +44,9 @@ export default function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/dealerregister" element={<DealerRegister />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
-
-              {/* Redirect root → dashboard */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-              {/* ----------------------------------------------------------------- */}
               {/* Authenticated Routes – Any logged‑in user */}
-              {/* ----------------------------------------------------------------- */}
               <Route element={<PrivateRoute />}>
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/machines" element={<Machines />} />
@@ -73,9 +56,7 @@ export default function App() {
                 <Route path="/profile" element={<Profile />} />
               </Route>
 
-              {/* ----------------------------------------------------------------- */}
-              {/* Dealer Stock – Accessible to Admins, Company Users, and Dealers */}
-              {/* ----------------------------------------------------------------- */}
+              {/* Dealer Stock – Admins, Company, Dealers */}
               <Route
                 element={
                   <PrivateRoute
@@ -90,11 +71,11 @@ export default function App() {
                 }
               >
                 <Route path="/dealer-stock" element={<DealerStock />} />
+                {/* ✅ NEW: Purchase Orders route */}
+                <Route path="/purchaseorder" element={<Purchaseorder />} />
               </Route>
 
-              {/* ----------------------------------------------------------------- */}
               {/* Admin‑Only Routes (App / Company / Dealer Admin) */}
-              {/* ----------------------------------------------------------------- */}
               <Route
                 element={
                   <PrivateRoute
@@ -111,9 +92,7 @@ export default function App() {
                 <Route path="/dealers" element={<Dealers />} />
               </Route>
 
-              {/* ----------------------------------------------------------------- */}
-              {/* Machine Installation – Admins + Employees (Both side) */}
-              {/* ----------------------------------------------------------------- */}
+              {/* Machine Installation – Admins + Employees */}
               <Route
                 element={
                   <PrivateRoute

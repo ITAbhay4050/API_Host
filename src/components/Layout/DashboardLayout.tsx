@@ -14,7 +14,7 @@ import {
   LogOut,
   UserCircle,
   Settings,
-  Package // ✅ NEW ICON
+  Package
 } from 'lucide-react';
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -59,7 +59,6 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     navigate('/login');
   };
 
-  // ✅ UPDATED NAV LINKS
   const getNavLinks = () => {
     switch (user?.role) {
 
@@ -73,8 +72,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
             <SidebarLink to="/machines" icon={<Boxes size={20} />} label="Machines" />
             <SidebarLink to="/tasks" icon={<ClipboardList size={20} />} label="Tasks" />
             <SidebarLink to="/tickets" icon={<TicketCheck size={20} />} label="Tickets" />
-
-            {/* ✅ NEW TAB */}
+            <SidebarLink to="/purchaseorder" icon={<TicketCheck size={20} />} label="Purchase Orders" />
             <SidebarLink to="/dealer-stock" icon={<Package size={20} />} label="Dealer Stock" />
           </>
         );
@@ -88,8 +86,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
             <SidebarLink to="/machines" icon={<Boxes size={20} />} label="Machines" />
             <SidebarLink to="/tasks" icon={<ClipboardList size={20} />} label="Tasks" />
             <SidebarLink to="/tickets" icon={<TicketCheck size={20} />} label="Tickets" />
-
-            {/* ✅ NEW TAB */}
+            <SidebarLink to="/purchaseorder" icon={<TicketCheck size={20} />} label="Purchase Orders" />
             <SidebarLink to="/dealer-stock" icon={<Package size={20} />} label="Dealer Stock" />
           </>
         );
@@ -101,8 +98,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
             <SidebarLink to="/machines" icon={<Boxes size={20} />} label="Machines" />
             <SidebarLink to="/tasks" icon={<ClipboardList size={20} />} label="Tasks" />
             <SidebarLink to="/tickets" icon={<TicketCheck size={20} />} label="Tickets" />
-
-            {/* ✅ OPTIONAL */}
+            <SidebarLink to="/purchaseorder" icon={<TicketCheck size={20} />} label="Purchase Orders" />
             <SidebarLink to="/dealer-stock" icon={<Package size={20} />} label="Dealer Stock" />
           </>
         );
@@ -115,8 +111,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
             <SidebarLink to="/machines" icon={<Boxes size={20} />} label="Machines" />
             <SidebarLink to="/tasks" icon={<ClipboardList size={20} />} label="Tasks" />
             <SidebarLink to="/tickets" icon={<TicketCheck size={20} />} label="Tickets" />
-
-            {/* ✅ MOST IMPORTANT (Dealer use case) */}
+            <SidebarLink to="/purchaseorder" icon={<TicketCheck size={20} />} label="Purchase Orders" />
             <SidebarLink to="/dealer-stock" icon={<Package size={20} />} label="Dealer Stock" />
           </>
         );
@@ -128,8 +123,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
             <SidebarLink to="/machines" icon={<Boxes size={20} />} label="Machines" />
             <SidebarLink to="/tasks" icon={<ClipboardList size={20} />} label="Tasks" />
             <SidebarLink to="/tickets" icon={<TicketCheck size={20} />} label="Tickets" />
-
-            {/* ✅ OPTIONAL */}
+            <SidebarLink to="/purchaseorder" icon={<TicketCheck size={20} />} label="Purchase Orders" />
             <SidebarLink to="/dealer-stock" icon={<Package size={20} />} label="Dealer Stock" />
           </>
         );

@@ -18,11 +18,11 @@ from django.conf import settings
 
 from .models import (
     Company, Dealer, Employee, LoginRecord,
-    MachineInstallation, InstallationPhoto, Task, AccountMaster, ticket, TicketCategory, Department
+    MachineInstallation, InstallationPhoto, Task, AccountMaster, ticket, TicketCategory, Department,DealerStockAudit,DealerStockMaster,DealerStockSyncLog
 )
 from .serializers import (
     CompanySerializer, DealerSerializer, EmployeeSerializer, TicketSerializer,
-    TicketCategorySerializer, DepartmentSerializer,
+    TicketCategorySerializer, DepartmentSerializer,DealerStockMaster,DealerStockMasterSerializer,DealerStockAuditSerializer,
     MachineInstallationSerializer, TaskSerializer, AccountMasterSerializer, UserRoleSerializer
 )
 from .utils import generate_otp, send_otp_email
@@ -854,3 +854,424 @@ class GetMachineDetails(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=500)
+class DealerAvailableStockView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        email = user.email
+
+        dealer = None
+
+        # ================= USER IDENTIFY =================
+        emp = Employee.objects.filter(email=email).first()
+        if emp and emp.role in ["DEALER_ADMIN", "DEALER_EMPLOYEE"]:
+            dealer = emp.dealer
+
+        elif Dealer.objects.filter(email=email).exists():
+            dealer = Dealer.objects.get(email=email)
+
+        if not dealer:
+            return Response({"error": "Only dealer users can access this page."}, status=403)
+
+        if not dealer.gst_no:
+            return Response({"error": "Dealer GST number not found."}, status=400)
+
+        search = request.query_params.get("search", "").strip()
+
+        try:
+            with connections['munim008_db'].cursor() as cursor:
+                query = """
+                    SELECT 
+                        am.AccountName,
+                        am.GSTNo,
+                        a.DocumentNo,
+                        a.DocumentDate,
+                        sibd.BatchNo,
+                        itm.ItemName,
+                        itm.ItemCode,
+                        itm.ProductCode
+                    FROM SalesInvoice AS a
+                    LEFT OUTER JOIN SalesInvoiceDetails AS b ON a.SalesInvoiceId = b.SalesInvoiceId
+                    LEFT OUTER JOIN ItemMaster AS itm ON itm.ItemMasterId = b.ItemMasterId
+                    LEFT OUTER JOIN SalesInvoiceBatchDetails AS sibd ON sibd.SalesInvoiceDetailsId = b.SalesInvoiceDetailsId
+                    LEFT OUTER JOIN accountmaster AS am ON am.AccountMasterId = a.PartyAccountMasterId
+                    WHERE itm.ItemGroupMasterId IN (2,3,5,8,10,11,12,13,14,16,29,20077,40103,40105,40107)
+                    AND a.DocumentDate >= '2026-02-01'
+                    AND a.DocumentDate <= GETDATE()
+                    AND UPPER(LTRIM(RTRIM(am.GSTNo))) = UPPER(LTRIM(RTRIM(%s)))
+                """
+
+                params = [dealer.gst_no]
+
+                if search:
+                    query += """
+                        AND (
+                            sibd.BatchNo LIKE %s OR
+                            itm.ItemName LIKE %s OR
+                            itm.ItemCode LIKE %s
+                        )
+                    """
+                    like_search = f"%{search}%"
+                    params.extend([like_search, like_search, like_search])
+
+                query += " ORDER BY a.DocumentDate DESC"
+
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+
+            # internal stock batch list
+            existing_stock_batches = set(
+                DealerStockMaster.objects.filter(dealer=dealer).values_list('batch_number', flat=True)
+            )
+
+            data = []
+            for row in rows:
+                account_name, gst_no, invoice_no, invoice_date, batch_no, item_name, item_code, product_code = row
+
+                data.append({
+                    "account_name": account_name,
+                    "gst_no": gst_no,
+                    "invoice_number": invoice_no,
+                    "invoice_date": invoice_date,
+                    "batch_number": batch_no,
+                    "item_name": item_name,
+                    "item_code": item_code,
+                    "product_code": product_code,
+                    "already_in_stock": batch_no in existing_stock_batches
+                })
+
+            return Response(data, status=200)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+class SaveDealerStockSelection(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        email = user.email
+
+        dealer = None
+        action_user = None
+
+        emp = Employee.objects.filter(email=email).first()
+        if emp and emp.role in ["DEALER_ADMIN", "DEALER_EMPLOYEE"]:
+            dealer = emp.dealer
+            action_user = emp
+
+        elif Dealer.objects.filter(email=email).exists():
+            dealer = Dealer.objects.get(email=email)
+
+        if not dealer:
+            return Response({"error": "Only dealer users can save stock."}, status=403)
+
+        stock_items = request.data.get("stock_items", [])
+
+        if not isinstance(stock_items, list) or not stock_items:
+            return Response({"error": "stock_items list is required."}, status=400)
+
+        saved_count = 0
+
+        for item in stock_items:
+            batch_number = item.get("batch_number")
+            if not batch_number:
+                continue
+
+            obj, created = DealerStockMaster.objects.get_or_create(
+                dealer=dealer,
+                batch_number=batch_number,
+                defaults={
+                    "company": dealer.company,
+                    "account_name": item.get("account_name"),
+                    "gst_no": item.get("gst_no"),
+                    "invoice_number": item.get("invoice_number"),
+                    "invoice_date": item.get("invoice_date"),
+                    "item_name": item.get("item_name"),
+                    "item_code": item.get("item_code"),
+                    "product_code": item.get("product_code"),
+                    "is_active_stock": True,
+                    "is_selected_by_dealer": True,
+                    "source": "dealer_selection",
+                    "created_by": action_user,
+                    "updated_by": action_user,
+                }
+            )
+
+            if not created:
+                obj.account_name = item.get("account_name")
+                obj.gst_no = item.get("gst_no")
+                obj.invoice_number = item.get("invoice_number")
+                obj.invoice_date = item.get("invoice_date")
+                obj.item_name = item.get("item_name")
+                obj.item_code = item.get("item_code")
+                obj.product_code = item.get("product_code")
+                obj.is_active_stock = True
+                obj.is_selected_by_dealer = True
+                obj.updated_by = action_user
+                obj.save()
+
+            DealerStockAudit.objects.create(
+                dealer_stock=obj,
+                action="selected",
+                action_by_employee=action_user,
+                action_by_name=action_user.name if action_user else dealer.name,
+                action_by_role=action_user.role if action_user else "DEALER_ADMIN",
+                remarks="Dealer selected this machine into stock."
+            )
+
+            saved_count += 1
+
+        return Response({
+            "message": f"{saved_count} machine(s) added to dealer stock successfully."
+        }, status=200)
+class RemoveDealerStockSelection(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        email = user.email
+
+        dealer = None
+        action_user = None
+
+        emp = Employee.objects.filter(email=email).first()
+        if emp and emp.role in ["DEALER_ADMIN", "DEALER_EMPLOYEE"]:
+            dealer = emp.dealer
+            action_user = emp
+
+        elif Dealer.objects.filter(email=email).exists():
+            dealer = Dealer.objects.get(email=email)
+
+        if not dealer:
+            return Response({"error": "Only dealer users can remove stock."}, status=403)
+
+        batch_number = request.data.get("batch_number", "").strip()
+        if not batch_number:
+            return Response({"error": "batch_number is required."}, status=400)
+
+        stock = DealerStockMaster.objects.filter(dealer=dealer, batch_number=batch_number).first()
+        if not stock:
+            return Response({"error": "Stock not found."}, status=404)
+
+        stock.is_active_stock = False
+        stock.is_selected_by_dealer = False
+        stock.updated_by = action_user
+        stock.save()
+
+        DealerStockAudit.objects.create(
+            dealer_stock=stock,
+            action="unselected",
+            action_by_employee=action_user,
+            action_by_name=action_user.name if action_user else dealer.name,
+            action_by_role=action_user.role if action_user else "DEALER_ADMIN",
+            remarks="Dealer removed this machine from stock."
+        )
+
+        return Response({"message": "Machine removed from dealer stock."}, status=200)
+class DealerMyStockView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        email = user.email
+
+        dealer = None
+
+        emp = Employee.objects.filter(email=email).first()
+        if emp and emp.role in ["DEALER_ADMIN", "DEALER_EMPLOYEE"]:
+            dealer = emp.dealer
+
+        elif Dealer.objects.filter(email=email).exists():
+            dealer = Dealer.objects.get(email=email)
+
+        if not dealer:
+            return Response({"error": "Only dealer users can access this stock."}, status=403)
+
+        search = request.query_params.get("search", "").strip()
+
+        qs = DealerStockMaster.objects.filter(
+            dealer=dealer,
+            is_active_stock=True
+        ).order_by("-created_at")
+
+        if search:
+            qs = qs.filter(
+                Q(batch_number__icontains=search) |
+                Q(item_name__icontains=search) |
+                Q(item_code__icontains=search)
+            )
+
+        serializer = DealerStockMasterSerializer(qs, many=True)
+        return Response(serializer.data)
+class CompanyDealerStockView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        email = user.email
+
+        emp = Employee.objects.filter(email=email).first()
+        company = None
+        role = None
+
+        if emp:
+            role = emp.role
+            if role == "APPLICATION_ADMIN":
+                company = None
+            elif role in ["COMPANY_ADMIN", "COMPANY_EMPLOYEE"]:
+                company = emp.company
+            elif role in ["DEALER_ADMIN", "DEALER_EMPLOYEE"]:
+                return Response({"error": "Dealer users cannot access this page."}, status=403)
+
+        elif Company.objects.filter(email=email).exists():
+            company = Company.objects.get(email=email)
+            role = "COMPANY_ADMIN"
+
+        dealer_id = request.query_params.get("dealer_id")
+        search = request.query_params.get("search", "").strip()
+
+        qs = DealerStockMaster.objects.filter(is_active_stock=True).select_related('dealer', 'company')
+
+        if role != "APPLICATION_ADMIN":
+            qs = qs.filter(company=company)
+
+        if dealer_id:
+            qs = qs.filter(dealer_id=dealer_id)
+
+        if search:
+            qs = qs.filter(
+                Q(batch_number__icontains=search) |
+                Q(item_name__icontains=search) |
+                Q(item_code__icontains=search) |
+                Q(dealer__name__icontains=search)
+            )
+
+        serializer = DealerStockMasterSerializer(qs, many=True)
+        return Response(serializer.data)
+class AddDealerStockByCompany(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        email = user.email
+
+        # ---------- Identify the acting user ----------
+        emp = Employee.objects.filter(email=email).first()
+        company_user = Company.objects.filter(email=email).first() if not emp else None
+
+        # Allowed roles: APPLICATION_ADMIN, COMPANY_ADMIN, COMPANY_EMPLOYEE (via Employee) OR direct Company user
+        is_allowed = False
+        action_user = None
+        action_name = ""
+        action_role = ""
+
+        if emp and emp.role in ["APPLICATION_ADMIN", "COMPANY_ADMIN", "COMPANY_EMPLOYEE"]:
+            is_allowed = True
+            action_user = emp
+            action_name = emp.name
+            action_role = emp.role
+        elif company_user:
+            # Direct company user (no Employee record)
+            is_allowed = True
+            action_user = None  # No Employee FK
+            action_name = company_user.name
+            action_role = "COMPANY_ADMIN"
+
+        if not is_allowed:
+            return Response({"error": "Only company/admin users can add stock."}, status=403)
+
+        # ---------- Request data ----------
+        dealer_id = request.data.get("dealer_id")
+        batch_number = request.data.get("batch_number", "").strip()
+
+        if not dealer_id or not batch_number:
+            return Response({"error": "dealer_id and batch_number are required."}, status=400)
+
+        dealer = Dealer.objects.filter(id=dealer_id).first()
+        if not dealer:
+            return Response({"error": "Dealer not found."}, status=404)
+
+        # Company validation for Employee (if action_user is Employee)
+        if emp and emp.role != "APPLICATION_ADMIN" and dealer.company_id != emp.company_id:
+            return Response({"error": "This dealer does not belong to your company."}, status=403)
+
+        # For direct company user, check that the dealer belongs to that company
+        if company_user and dealer.company_id != company_user.id:
+            return Response({"error": "This dealer does not belong to your company."}, status=403)
+
+        # ---------- Fetch from external DB ----------
+        try:
+            with connections['munim008_db'].cursor() as cursor:
+                query = """
+                    SELECT 
+                        am.AccountName,
+                        am.GSTNo,
+                        a.DocumentNo,
+                        a.DocumentDate,
+                        sibd.BatchNo,
+                        itm.ItemName,
+                        itm.ItemCode,
+                        itm.ProductCode
+                    FROM SalesInvoice AS a
+                    LEFT OUTER JOIN SalesInvoiceDetails AS b ON a.SalesInvoiceId = b.SalesInvoiceId
+                    LEFT OUTER JOIN ItemMaster AS itm ON itm.ItemMasterId = b.ItemMasterId
+                    LEFT OUTER JOIN SalesInvoiceBatchDetails AS sibd ON sibd.SalesInvoiceDetailsId = b.SalesInvoiceDetailsId
+                    LEFT OUTER JOIN accountmaster AS am ON am.AccountMasterId = a.PartyAccountMasterId
+                    WHERE itm.ItemGroupMasterId IN (2,3,5,8,10,11,12,13,14,16,29,20077,40103,40105,40107)
+                    AND sibd.BatchNo = %s
+                    AND UPPER(LTRIM(RTRIM(am.GSTNo))) = UPPER(LTRIM(RTRIM(%s)))
+                """
+                cursor.execute(query, [batch_number, dealer.gst_no])
+                row = cursor.fetchone()
+
+            if not row:
+                return Response({"error": "Machine not found in external DB for this dealer GST."}, status=404)
+
+            account_name, gst_no, invoice_no, invoice_date, batch_no, item_name, item_code, product_code = row
+
+            obj, created = DealerStockMaster.objects.get_or_create(
+                dealer=dealer,
+                batch_number=batch_no,
+                defaults={
+                    "company": dealer.company,
+                    "account_name": account_name,
+                    "gst_no": gst_no,
+                    "invoice_number": invoice_no,
+                    "invoice_date": invoice_date,
+                    "item_name": item_name,
+                    "item_code": item_code,
+                    "product_code": product_code,
+                    "is_active_stock": True,
+                    "is_selected_by_dealer": False,
+                    "source": "company_added" if not company_user else "system_added",
+                    "created_by": action_user,  # may be None for direct company user
+                    "updated_by": action_user,
+                }
+            )
+
+            if not created:
+                obj.is_active_stock = True
+                obj.updated_by = action_user
+                obj.save()
+
+            DealerStockAudit.objects.create(
+                dealer_stock=obj,
+                action="added",
+                action_by_employee=action_user,
+                action_by_name=action_name,
+                action_by_role=action_role,
+                remarks="Added to dealer stock by company/system user."
+            )
+
+            return Response({"message": "Machine added to dealer stock successfully."}, status=200)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+class DealerStockAuditView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, stock_id):
+        audits = DealerStockAudit.objects.filter(dealer_stock_id=stock_id).order_by('-action_time')
+        serializer = DealerStockAuditSerializer(audits, many=True)
+        return Response(serializer.data)

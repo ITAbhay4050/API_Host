@@ -485,6 +485,98 @@ class ticket(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+class DealerStockMaster(models.Model):
+    dealer = models.ForeignKey('Dealer', on_delete=models.CASCADE, related_name='dealer_stocks')
+    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='company_dealer_stocks', null=True, blank=True)
 
+    account_name = models.CharField(max_length=255, blank=True, null=True)
+    gst_no = models.CharField(max_length=30, blank=True, null=True)
 
+    invoice_number = models.CharField(max_length=100, blank=True, null=True)
+    invoice_date = models.DateField(blank=True, null=True)
 
+    batch_number = models.CharField(max_length=100, db_index=True)
+    item_name = models.CharField(max_length=255, blank=True, null=True)
+    item_code = models.CharField(max_length=100, blank=True, null=True)
+    product_code = models.CharField(max_length=100, blank=True, null=True)
+
+    is_active_stock = models.BooleanField(default=True)  # dealer ke stock me hai ya nahi
+    is_selected_by_dealer = models.BooleanField(default=False)  # dealer ne tick kiya ya company ne add kiya
+
+    source = models.CharField(
+        max_length=50,
+        choices=[
+            ('dealer_selection', 'Dealer Selection'),
+            ('company_added', 'Company Added'),
+            ('system_added', 'System Added'),
+        ],
+        default='dealer_selection'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    created_by = models.ForeignKey(
+        'Employee',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_dealer_stocks'
+    )
+
+    updated_by = models.ForeignKey(
+        'Employee',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_dealer_stocks'
+    )
+
+    class Meta:
+        unique_together = ('dealer', 'batch_number')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.dealer.name} - {self.batch_number}"
+class DealerStockAudit(models.Model):
+    ACTION_CHOICES = [
+        ('added', 'Added'),
+        ('removed', 'Removed'),
+        ('selected', 'Selected'),
+        ('unselected', 'Unselected'),
+    ]
+
+    dealer_stock = models.ForeignKey(
+        'DealerStockMaster',
+        on_delete=models.CASCADE,
+        related_name='audits'
+    )
+
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    remarks = models.TextField(blank=True, null=True)
+
+    action_by_employee = models.ForeignKey(
+        'Employee',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+
+    action_by_name = models.CharField(max_length=255, blank=True, null=True)
+    action_by_role = models.CharField(max_length=100, blank=True, null=True)
+
+    action_time = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-action_time']
+
+    def __str__(self):
+        return f"{self.dealer_stock.batch_number} - {self.action}"
+class DealerStockSyncLog(models.Model):
+    dealer = models.ForeignKey('Dealer', on_delete=models.CASCADE, related_name='stock_sync_logs')
+    synced_by = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, blank=True)
+    synced_at = models.DateTimeField(auto_now_add=True)
+    total_records = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.dealer.name} - {self.synced_at}"

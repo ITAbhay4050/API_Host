@@ -7,6 +7,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password
 from django.utils import timezone
 from rest_framework import serializers
+from .models import DealerStockMaster, DealerStockAudit
 from django.db import connections
 
 from .models import (
@@ -518,3 +519,18 @@ class UserRoleSerializer(serializers.Serializer):
         elif isinstance(obj, Dealer):
             return obj.id
         return None
+
+
+class DealerStockMasterSerializer(serializers.ModelSerializer):
+    dealer_name = serializers.CharField(source='dealer.name', read_only=True)
+    company_name = serializers.CharField(source='company.name', read_only=True)
+
+    class Meta:
+        model = DealerStockMaster
+        fields = '__all__'
+
+
+class DealerStockAuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DealerStockAudit
+        fields = '__all__'

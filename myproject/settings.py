@@ -26,7 +26,7 @@ ALLOWED_HOSTS: list[str] = [host.strip() for host in os.getenv("DJ_ALLOWED_HOSTS
 # Applications
 # -----------------------------------------------------------------------------
 INSTALLED_APPS: list[str] = [
-    'jazzmin',
+    #"jazzmin",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -97,6 +97,17 @@ DATABASES = {
     "munim006_db": {
         "ENGINE": "mssql",
         "NAME": "Munim006",
+        "USER": "sa",
+        "PASSWORD": "nipl@12345",
+        "HOST": "192.168.1.4",
+        "PORT": "1433",
+        "OPTIONS": {
+            "driver": "ODBC Driver 17 for SQL Server",
+        },
+    },
+     "munim008_db": {
+        "ENGINE": "mssql",
+        "NAME": "Munim008",
         "USER": "sa",
         "PASSWORD": "nipl@12345",
         "HOST": "192.168.1.4",

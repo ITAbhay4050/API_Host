@@ -1,7 +1,15 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
-
+from .views import (
+    DealerAvailableStockView,DealerStockAuditView,
+    SaveDealerStockSelection,
+    RemoveDealerStockSelection,
+    DealerMyStockView,
+    CompanyDealerStockView,
+    AddDealerStockByCompany,
+    DealerStockAuditView,
+)
 router = DefaultRouter()
 router.register(r'tasks', views.TaskViewSet, basename='task')
 router.register(r'employees', views.EmployeeViewSet, basename='employee')
@@ -41,4 +49,12 @@ urlpatterns = [
 
     # Routers
     path("", include(router.urls)),
+    #For Dealer Stock
+    path('dealer-stock/available/', DealerAvailableStockView.as_view(), name='dealer-available-stock'),
+    path('dealer-stock/save-selection/', SaveDealerStockSelection.as_view(), name='save-dealer-stock-selection'),
+    path('dealer-stock/remove-selection/', RemoveDealerStockSelection.as_view(), name='remove-dealer-stock-selection'),
+    path('dealer-stock/my-stock/', DealerMyStockView.as_view(), name='dealer-my-stock'),
+    path('dealer-stock/company-view/', CompanyDealerStockView.as_view(), name='company-dealer-stock-view'),
+    path('dealer-stock/company-add/', AddDealerStockByCompany.as_view(), name='company-add-dealer-stock'),
+    path('dealer-stock/audit/<int:stock_id>/', DealerStockAuditView.as_view(), name='dealer-stock-audit'),
 ]
