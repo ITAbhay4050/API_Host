@@ -1,14 +1,13 @@
+// dealerStockApi.ts
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api';
 
-// Reuse the same axios instance pattern as in your api.ts
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Request interceptor to add auth token
 apiClient.interceptors.request.use(
   (config) => {
     const stored = localStorage.getItem('user');
@@ -30,7 +29,6 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle 401
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -94,6 +92,16 @@ export const fetchMyStock = async (search = '') => {
   }
 };
 
+// NEW: fetch dealer selection status (one‑time flag)
+export const fetchDealerSelectionStatus = async () => {
+  try {
+    const response = await apiClient.get('/dealer-stock/selection-status/');
+    return response.data; // expected: { hasSelected: boolean }
+  } catch (error) {
+    return handleApiError(error);
+  }
+};
+
 // ========== Company/Admin Endpoints ==========
 export const fetchCompanyStock = async (dealerId: number | null = null, search = '') => {
   try {
@@ -125,41 +133,30 @@ export const fetchStockAudit = async (stockId: number) => {
     return handleApiError(error);
   }
 };
-// ========== Sell & Return Endpoints ==========
-export const sellStock = async (data: {
-  batch_number: string;
-  customer_name: string;
-  customer_mobile: string;
-  customer_address: string;
-  sell_date: string;
-  remarks?: string;
-}) => {
+
+// ========== Sell & Return ==========
+export const sellStock = async (batchNumber: string) => {
   try {
-    const response = await apiClient.post('/dealer-stock/sell/', data);
+    const response = await apiClient.post('/dealer-stock/sell/', { batch_number: batchNumber });
     return response.data;
   } catch (error) {
     return handleApiError(error);
   }
 };
 
-export const returnStock = async (data: {
-  batch_number: string;
-  return_date: string;
-  reason: string;
-  remarks?: string;
-}) => {
+export const returnStock = async (batchNumber: string, reason: string) => {
   try {
-    const response = await apiClient.post('/dealer-stock/return/', data);
+    const response = await apiClient.post('/dealer-stock/return/', { batch_number: batchNumber, reason });
     return response.data;
   } catch (error) {
     return handleApiError(error);
   }
 };
 
-// Optional: fetch stock history for a specific item
-export const fetchStockHistory = async (batchNumber: string) => {
+export const fetchSoldStock = async (search = '') => {
   try {
-    const response = await apiClient.get(`/dealer-stock/history/${batchNumber}/`);
+    const params = search ? { search } : {};
+    const response = await apiClient.get('/dealer-stock/sold/', { params });
     return response.data;
   } catch (error) {
     return handleApiError(error);

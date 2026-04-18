@@ -5,9 +5,9 @@ from .views import (
     DealerAvailableStockView,DealerStockAuditView,
     SaveDealerStockSelection,
     RemoveDealerStockSelection,
-    DealerMyStockView,
+    DealerMyStockView,DealerSoldStockView,
     CompanyDealerStockView,
-    AddDealerStockByCompany,
+    AddDealerStockByCompany,SellDealerStockView,ReturnDealerStockView,
     DealerStockAuditView,
 )
 router = DefaultRouter()
@@ -57,4 +57,7 @@ urlpatterns = [
     path('dealer-stock/company-view/', CompanyDealerStockView.as_view(), name='company-dealer-stock-view'),
     path('dealer-stock/company-add/', AddDealerStockByCompany.as_view(), name='company-add-dealer-stock'),
     path('dealer-stock/audit/<int:stock_id>/', DealerStockAuditView.as_view(), name='dealer-stock-audit'),
+    path('dealer-stock/sell/', SellDealerStockView.as_view(), name='sell-dealer-stock'),
+    path('dealer-stock/return/', ReturnDealerStockView.as_view(), name='return-dealer-stock'),
+    path('dealer-stock/sold/', DealerSoldStockView.as_view(), name='dealer-sold-stock'),
 ]

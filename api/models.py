@@ -216,21 +216,19 @@ class LoginRecord(models.Model):
 
 class MachineInstallation(models.Model):
     """Physical machine installations done by dealers or companies."""
-
     company = models.ForeignKey('Company', on_delete=models.CASCADE, null=True, blank=True)
     dealer = models.ForeignKey('Dealer', on_delete=models.CASCADE, null=True, blank=True)
 
-    # Machine details (auto-filled from Munim006 DB)
+    # Machine details
     item_name = models.CharField(max_length=255, blank=True, null=True)
     item_code = models.CharField(max_length=100, blank=True, null=True)
     batch_number = models.CharField(max_length=100, null=True, blank=True)
-    
     invoice_number = models.CharField(max_length=100, blank=True, null=True)
     purchase_date = models.DateField(blank=True, null=True)
 
     # Client details
     client_company_name = models.CharField(max_length=255, null=True, blank=True)
-    client_gst_number = models.CharField(max_length=30, null=True, blank=True) # Increased max_length for GST
+    client_gst_number = models.CharField(max_length=30, null=True, blank=True)
     client_contact_person = models.CharField(max_length=100, null=True, blank=True)
     client_contact_phone = models.CharField(max_length=20, null=True, blank=True)
 
@@ -240,17 +238,16 @@ class MachineInstallation(models.Model):
     location = models.TextField()
     notes = models.TextField(blank=True, null=True)
 
-    # Submission metadata
+    # Submission metadata – allow null for dealer submissions
     submitted_by = models.ForeignKey(
         'Employee',
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         related_name='submitted_installations'
     )
-    # submitted_by_role and submitted_by_name can be redundant if submitted_by is always set.
-    # Consider removing these and deriving from submitted_by if performance isn't an issue.
-    submitted_by_role = models.CharField(max_length=100) 
-    submitted_by_name = models.CharField(max_length=100)
+    submitted_by_role = models.CharField(max_length=100)   # required, set by view
+    submitted_by_name = models.CharField(max_length=100)   # required, set by view
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -265,7 +262,7 @@ class MachineInstallation(models.Model):
         if self.company and self.dealer:
             raise ValidationError("An installation cannot be associated with both a company and a dealer.")
 
-        # Validate submitted_by based on company/dealer
+        # Skip employee validation if submitted_by is null (dealer submission)
         if self.submitted_by:
             is_company_role = self.submitted_by.role in ["COMPANY_ADMIN", "COMPANY_EMPLOYEE"]
             is_dealer_role = self.submitted_by.role in ["DEALER_ADMIN", "DEALER_EMPLOYEE"]
@@ -273,32 +270,34 @@ class MachineInstallation(models.Model):
             if is_company_role:
                 if not self.company or self.submitted_by.company != self.company:
                     raise ValidationError("Submitted employee's company does not match installation company.")
-                if self.dealer: # If it's a company employee, it shouldn't be associated with a dealer installation
+                if self.dealer:
                     raise ValidationError("Company employee cannot submit a dealer installation.")
             elif is_dealer_role:
                 if not self.dealer or self.submitted_by.dealer != self.dealer:
                     raise ValidationError("Submitted employee's dealer does not match installation dealer.")
-                if self.company: # If it's a dealer employee, it shouldn't be associated with a company installation
+                if self.company:
                     raise ValidationError("Dealer employee cannot submit a company installation.")
             elif self.submitted_by.role == "APPLICATION_ADMIN":
-                 # Application admins can submit for either company or dealer.
-                 # The current logic allows this if only one of company/dealer is set on the installation.
-                 pass
+                # Application admins can submit for either
+                pass
             else:
                 raise ValidationError("Invalid submitted_by role for installation.")
-        
-        # Populate submitted_by_role and submitted_by_name automatically
-        if self.submitted_by:
-            self.submitted_by_role = self.submitted_by.get_role_display()
-            self.submitted_by_name = self.submitted_by.name
 
+        # Optionally, ensure submitted_by_name and submitted_by_role are not empty
+        if not self.submitted_by_name:
+            raise ValidationError({"submitted_by_name": "This field cannot be blank."})
+        if not self.submitted_by_role:
+            raise ValidationError({"submitted_by_role": "This field cannot be blank."})
 
     def save(self, *args, **kwargs):
-        self.full_clean()  # Call clean method before saving
+        self.full_clean()
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Installation: {self.item_name} – Batch No: {self.batch_number}"
+
+
+
 
 
 class InstallationPhoto(models.Model):
@@ -486,6 +485,11 @@ class ticket(models.Model):
         self.full_clean()
         super().save(*args, **kwargs)
 class DealerStockMaster(models.Model):
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('sold', 'Sold'),
+        ('returned', 'Returned'),
+    ]
     dealer = models.ForeignKey('Dealer', on_delete=models.CASCADE, related_name='dealer_stocks')
     company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='company_dealer_stocks', null=True, blank=True)
 
@@ -500,8 +504,10 @@ class DealerStockMaster(models.Model):
     item_code = models.CharField(max_length=100, blank=True, null=True)
     product_code = models.CharField(max_length=100, blank=True, null=True)
 
-    is_active_stock = models.BooleanField(default=True)  # dealer ke stock me hai ya nahi
-    is_selected_by_dealer = models.BooleanField(default=False)  # dealer ne tick kiya ya company ne add kiya
+    is_active_stock = models.BooleanField(default=True) 
+    is_selected_by_dealer = models.BooleanField(default=False)  
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    sold_date = models.DateTimeField(null=True, blank=True)
 
     source = models.CharField(
         max_length=50,
@@ -538,13 +544,21 @@ class DealerStockMaster(models.Model):
 
     def __str__(self):
         return f"{self.dealer.name} - {self.batch_number}"
+    def save(self, *args, **kwargs):
+        if self.status != 'active':
+            self.is_active_stock = False
+        else:
+            self.is_active_stock = True
+        super().save(*args, **kwargs)
 class DealerStockAudit(models.Model):
     ACTION_CHOICES = [
-        ('added', 'Added'),
-        ('removed', 'Removed'),
-        ('selected', 'Selected'),
-        ('unselected', 'Unselected'),
-    ]
+    ('added', 'Added'),
+    ('removed', 'Removed'),
+    ('selected', 'Selected'),
+    ('unselected', 'Unselected'),
+    ('sold', 'Sold'),
+    ('returned', 'Returned'),
+]
 
     dealer_stock = models.ForeignKey(
         'DealerStockMaster',
@@ -580,3 +594,26 @@ class DealerStockSyncLog(models.Model):
 
     def __str__(self):
         return f"{self.dealer.name} - {self.synced_at}"
+class DealerStockReturn(models.Model):
+    dealer_stock = models.ForeignKey(DealerStockMaster, on_delete=models.CASCADE, related_name='returns')
+    dealer = models.ForeignKey('Dealer', on_delete=models.CASCADE)
+    batch_number = models.CharField(max_length=100)
+    item_name = models.CharField(max_length=255)
+    invoice_number = models.CharField(max_length=100, blank=True, null=True)
+    invoice_date = models.DateField(blank=True, null=True)
+    returned_by_employee = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, blank=True)
+    returned_by_name = models.CharField(max_length=255)
+    returned_by_role = models.CharField(max_length=100)
+    returned_at = models.DateTimeField(auto_now_add=True)
+    reason = models.TextField()
+    remarks = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.batch_number} returned by {self.returned_by_name}"
+    
+# class purchaseorder (models.Model):
+#     ItemName = models.TextField()
+#     ItemCode  = models.CharField(max_length=30)
+#     Product_Code = models.CharField(max_length=30)
+#     OrderQuantity = models.CharField()
+#     Remarks = models.TextField()

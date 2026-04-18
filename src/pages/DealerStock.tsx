@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Search, Eye, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { Search, Eye, Plus, RefreshCw, ShoppingCart, Undo2, PackageOpen } from 'lucide-react';
 import DashboardLayout from '../components/Layout/DashboardLayout';
 import { useAuth } from '../context/AuthContext';
 import { UserRole } from '../types';
@@ -30,27 +31,29 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 
 // API services
 import {
   fetchAvailableStock,
   saveSelectedStock,
-  removeStockSelection,
   fetchMyStock,
   fetchCompanyStock,
   addStockByCompany,
   fetchStockAudit,
+  returnStock,
+  fetchSoldStock,
 } from '../services/dealerStockApi';
 
 // =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 const DealerStock = () => {
+  const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
 
-  // Role checks
   const isDealerUser = useMemo(
     () => currentUser?.role === UserRole.DEALER_ADMIN || currentUser?.role === UserRole.DEALER_EMPLOYEE,
     [currentUser]
@@ -62,21 +65,24 @@ const DealerStock = () => {
     [currentUser]
   );
 
-  // Tab state (only dealer stock tabs)
   const [activeTab, setActiveTab] = useState('available');
 
-  // ---------- Available Stock (Dealer) ----------
+  // ---------- Available Stock ----------
   const [availableStock, setAvailableStock] = useState<any[]>([]);
   const [availableLoading, setAvailableLoading] = useState(false);
   const [availableSearch, setAvailableSearch] = useState('');
   const [selectedBatchNumbers, setSelectedBatchNumbers] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
-  // ---------- My Stock (Dealer) ----------
+  // ---------- My Stock ----------
   const [myStock, setMyStock] = useState<any[]>([]);
   const [myStockLoading, setMyStockLoading] = useState(false);
   const [myStockSearch, setMyStockSearch] = useState('');
-  const [removingBatch, setRemovingBatch] = useState<string | null>(null);
+
+  // ---------- Sold Stock ----------
+  const [soldStock, setSoldStock] = useState<any[]>([]);
+  const [soldStockLoading, setSoldStockLoading] = useState(false);
+  const [soldStockSearch, setSoldStockSearch] = useState('');
 
   // ---------- Company View ----------
   const [companyStock, setCompanyStock] = useState<any[]>([]);
@@ -94,7 +100,15 @@ const DealerStock = () => {
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
 
-  // Extract unique dealers from company stock for filter dropdown
+  // ---------- Return Dialog ----------
+  const [returnDialogOpen, setReturnDialogOpen] = useState(false);
+  const [returnBatch, setReturnBatch] = useState('');
+  const [returnReason, setReturnReason] = useState('');
+  const [returning, setReturning] = useState(false);
+
+  // ---------- Selling state (for loading) ----------
+  const [sellingBatch, setSellingBatch] = useState<string | null>(null);
+
   useEffect(() => {
     if (isAdmin && companyStock.length) {
       const unique = Array.from(
@@ -131,6 +145,19 @@ const DealerStock = () => {
     }
   }, [myStockSearch, isDealerUser, toast]);
 
+  const loadSoldStock = useCallback(async () => {
+    if (!isDealerUser) return;
+    setSoldStockLoading(true);
+    try {
+      const data = await fetchSoldStock(soldStockSearch);
+      setSoldStock(data);
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setSoldStockLoading(false);
+    }
+  }, [soldStockSearch, isDealerUser, toast]);
+
   const loadCompanyStock = useCallback(async () => {
     if (!isAdmin) return;
     setCompanyLoading(true);
@@ -145,12 +172,12 @@ const DealerStock = () => {
     }
   }, [selectedDealerId, companySearch, isAdmin, toast]);
 
-  // Load data on tab change or search
   useEffect(() => {
     if (activeTab === 'available' && isDealerUser) loadAvailableStock();
     if (activeTab === 'my-stock' && isDealerUser) loadMyStock();
+    if (activeTab === 'sold-list' && isDealerUser) loadSoldStock();
     if (activeTab === 'company-view' && isAdmin) loadCompanyStock();
-  }, [activeTab, loadAvailableStock, loadMyStock, loadCompanyStock, isDealerUser, isAdmin]);
+  }, [activeTab, loadAvailableStock, loadMyStock, loadSoldStock, loadCompanyStock, isDealerUser, isAdmin]);
 
   // ========== Handlers ==========
   const handleToggleSelectBatch = (batchNumber: string) => {
@@ -193,17 +220,45 @@ const DealerStock = () => {
     }
   };
 
-  const handleRemoveStock = async (batchNumber: string) => {
-    if (!window.confirm('Are you sure you want to remove this machine from your stock?')) return;
-    setRemovingBatch(batchNumber);
+  const handleSell = (stockItem: any) => {
+    setSellingBatch(stockItem.batch_number);
+    navigate('/machine-installation', {
+      state: {
+        prefillFromSell: true,
+        stockItem: {
+          batch_number: stockItem.batch_number,
+          item_name: stockItem.item_name,
+          item_code: stockItem.item_code,
+          invoice_number: stockItem.invoice_number,
+          purchase_date: stockItem.invoice_date,
+        }
+      }
+    });
+    setSellingBatch(null);
+  };
+
+  const handleReturnClick = (batchNumber: string) => {
+    setReturnBatch(batchNumber);
+    setReturnReason('');
+    setReturnDialogOpen(true);
+  };
+
+  const handleReturnConfirm = async () => {
+    if (!returnReason.trim()) {
+      toast({ title: 'Reason required', description: 'Please provide a reason for return.', variant: 'destructive' });
+      return;
+    }
+    setReturning(true);
     try {
-      await removeStockSelection(batchNumber);
-      toast({ title: 'Removed', description: 'Machine removed from your stock.' });
+      await returnStock(returnBatch, returnReason);
+      toast({ title: 'Returned', description: 'Stock has been returned.' });
+      setReturnDialogOpen(false);
       loadMyStock();
+      loadSoldStock(); // Refresh sold list in case of returns (if needed)
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
-      setRemovingBatch(null);
+      setReturning(false);
     }
   };
 
@@ -288,34 +343,110 @@ const DealerStock = () => {
     if (myStockLoading) return <Skeleton className="h-64 w-full" />;
     if (myStock.length === 0) return <div className="text-center py-8 text-muted-foreground">You have no stock yet. Go to "Available Stock" tab to add.</div>;
     return (
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Item Name</TableHead>
-            <TableHead>Batch No.</TableHead>
-            <TableHead>Invoice No.</TableHead>
-            <TableHead>Invoice Date</TableHead>
-            <TableHead>Source</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {myStock.map((item) => (
-            <TableRow key={item.id}>
-              <TableCell>{item.item_name}</TableCell>
-              <TableCell>{item.batch_number}</TableCell>
-              <TableCell>{item.invoice_number}</TableCell>
-              <TableCell>{item.invoice_date ? format(new Date(item.invoice_date), 'PPP') : '-'}</TableCell>
-              <TableCell><Badge variant="outline">{item.source}</Badge></TableCell>
-              <TableCell>
-                <Button size="sm" variant="destructive" onClick={() => handleRemoveStock(item.batch_number)} disabled={removingBatch === item.batch_number}>
-                  <Trash2 className="h-3 w-3 mr-1" /> Remove
-                </Button>
-              </TableCell>
+      <>
+        <div className="flex justify-between items-center mb-4">
+          <div className="text-sm text-muted-foreground">
+            Total Stock: <span className="font-bold text-foreground">{myStock.length}</span> items
+          </div>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Item Name</TableHead>
+              <TableHead>Batch No.</TableHead>
+              <TableHead>Invoice No.</TableHead>
+              <TableHead>Invoice Date</TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {myStock.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>{item.item_name}</TableCell>
+                <TableCell>{item.batch_number}</TableCell>
+                <TableCell>{item.invoice_number}</TableCell>
+                <TableCell>{item.invoice_date ? format(new Date(item.invoice_date), 'PPP') : '-'}</TableCell>
+                <TableCell><Badge variant="outline">{item.source}</Badge></TableCell>
+                <TableCell>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={() => handleSell(item)}
+                      disabled={sellingBatch === item.batch_number}
+                    >
+                      <ShoppingCart className="h-3 w-3 mr-1" />
+                      Sell
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleReturnClick(item.batch_number)}
+                    >
+                      <Undo2 className="h-3 w-3 mr-1" />
+                      Return
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </>
+    );
+  };
+
+  const renderSoldStockTable = () => {
+    if (soldStockLoading) return <Skeleton className="h-64 w-full" />;
+    if (soldStock.length === 0) return <div className="text-center py-8 text-muted-foreground">No sold stock records found.</div>;
+    return (
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Item Name</TableHead>
+              <TableHead>Batch No.</TableHead>
+              <TableHead>Invoice No.</TableHead>
+              <TableHead>Purchase Date</TableHead>
+              <TableHead>Sold Date</TableHead>
+              <TableHead>Customer</TableHead>
+              <TableHead>Installation Date</TableHead>
+              <TableHead>Sold By</TableHead>
+              <TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {soldStock.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>{item.item_name}</TableCell>
+                <TableCell>{item.batch_number}</TableCell>
+                <TableCell>{item.invoice_number}</TableCell>
+                <TableCell>{item.purchase_date ? format(new Date(item.purchase_date), 'PPP') : '-'}</TableCell>
+                <TableCell>{item.sold_date ? format(new Date(item.sold_date), 'PPP pp') : '-'}</TableCell>
+                <TableCell>
+                  <div className="text-sm">
+                    <div>{item.customer_company_name || 'N/A'}</div>
+                    <div className="text-xs text-muted-foreground">{item.customer_contact_person} | {item.customer_contact_phone}</div>
+                  </div>
+                </TableCell>
+                <TableCell>{item.installation_date ? format(new Date(item.installation_date), 'PPP') : '-'}</TableCell>
+                <TableCell>
+                  <div className="text-sm">
+                    <div>{item.sold_by_name || 'N/A'}</div>
+                    <div className="text-xs text-muted-foreground">{item.sold_by_role || 'N/A'}</div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Button size="sm" variant="outline" onClick={() => handleViewAudit(item.id)}>
+                    <Eye className="h-3 w-3 mr-1" /> Audit
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     );
   };
 
@@ -369,9 +500,10 @@ const DealerStock = () => {
         <h2 className="text-3xl font-bold tracking-tight">Dealer Stock Management</h2>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsList className="grid w-full max-w-md grid-cols-3">
             {isDealerUser && <TabsTrigger value="available">Available Stock</TabsTrigger>}
             {isDealerUser && <TabsTrigger value="my-stock">My Stock</TabsTrigger>}
+            {isDealerUser && <TabsTrigger value="sold-list">Sold List</TabsTrigger>}
             {isAdmin && <TabsTrigger value="company-view">Company View</TabsTrigger>}
           </TabsList>
 
@@ -432,6 +564,33 @@ const DealerStock = () => {
             </TabsContent>
           )}
 
+          {/* Dealer: Sold List */}
+          {isDealerUser && (
+            <TabsContent value="sold-list" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Sold Machines</CardTitle>
+                  <CardDescription>History of all sold machines with installation details.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex gap-4 mb-6">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search by batch, item name..."
+                        value={soldStockSearch}
+                        onChange={(e) => setSoldStockSearch(e.target.value)}
+                        className="pl-8"
+                      />
+                    </div>
+                    <Button onClick={loadSoldStock} variant="outline">Refresh</Button>
+                  </div>
+                  {renderSoldStockTable()}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
           {/* Company / Admin View */}
           {isAdmin && (
             <TabsContent value="company-view" className="space-y-4">
@@ -474,7 +633,7 @@ const DealerStock = () => {
           )}
         </Tabs>
 
-        {/* Manual Add Dialog (Company) */}
+        {/* Manual Add Dialog */}
         <Dialog open={manualAddOpen} onOpenChange={setManualAddOpen}>
           <DialogContent>
             <DialogHeader>
@@ -503,6 +662,37 @@ const DealerStock = () => {
             <DialogFooter>
               <Button variant="outline" onClick={() => setManualAddOpen(false)}>Cancel</Button>
               <Button onClick={handleManualAdd} disabled={manualAdding}>{manualAdding ? 'Adding...' : 'Add'}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Return Dialog */}
+        <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Return Machine</DialogTitle>
+              <DialogDescription>Please provide a reason for returning this machine.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <Label>Batch Number</Label>
+                <Input value={returnBatch} disabled />
+              </div>
+              <div>
+                <Label>Reason for Return</Label>
+                <Textarea
+                  placeholder="Enter reason..."
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  rows={4}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setReturnDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleReturnConfirm} disabled={returning}>
+                {returning ? 'Processing...' : 'Confirm Return'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

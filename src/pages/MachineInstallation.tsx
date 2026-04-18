@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -39,6 +39,7 @@ type FormData = {
 export default function MachineInstallation() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const allowedRoles: UserRole[] = [
     UserRole.COMPANY_EMPLOYEE,
@@ -48,7 +49,6 @@ export default function MachineInstallation() {
     UserRole.SYSTEM_ADMIN,
   ];
   
-  // Fix: Check if user exists and has a role that's in the allowedRoles array
   const canAccess = user && allowedRoles.includes(user.role as UserRole);
 
   const [isSubmitting, setSubmitting] = useState(false);
@@ -56,7 +56,17 @@ export default function MachineInstallation() {
   const [batchInput, setBatchInput] = useState<string>("");
   const [detailsFetched, setDetailsFetched] = useState(false);
 
-  // Check user roles for editing permissions
+  const prefillData = location.state as {
+    prefillFromSell?: boolean;
+    stockItem?: {
+      batch_number: string;
+      item_name: string;
+      item_code: string;
+      invoice_number: string;
+      purchase_date: string;
+    };
+  } | null;
+
   const isDealerUser = user?.role === UserRole.DEALER_EMPLOYEE || user?.role === UserRole.DEALER_ADMIN;
   const isCompanyUser = user?.role === UserRole.COMPANY_EMPLOYEE || user?.role === UserRole.COMPANY_ADMIN || user?.role === UserRole.SYSTEM_ADMIN;
 
@@ -75,6 +85,22 @@ export default function MachineInstallation() {
     invoiceNumber: "",
     purchaseDate: "",
   });
+
+  useEffect(() => {
+    if (prefillData?.prefillFromSell && prefillData.stockItem) {
+      const { batch_number, item_name, item_code, invoice_number, purchase_date } = prefillData.stockItem;
+      setForm(prev => ({
+        ...prev,
+        batchNumber: batch_number,
+        itemName: item_name,
+        itemCode: item_code,
+        invoiceNumber: invoice_number,
+        purchaseDate: purchase_date || "",
+      }));
+      setBatchInput(batch_number);
+      setDetailsFetched(true);
+    }
+  }, [prefillData]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -192,10 +218,39 @@ export default function MachineInstallation() {
     }
   }, [batchInput, user?.token, isDealerUser]);
 
+ const markStockAsSold = async (batchNumber: string, stockData?: any) => {
+  try {
+    const payload: any = { batch_number: batchNumber };
+    if (stockData) {
+      payload.item_name = stockData.item_name;
+      payload.item_code = stockData.item_code;
+      payload.invoice_number = stockData.invoice_number;
+      payload.purchase_date = stockData.purchase_date;
+    }
+    const response = await fetch(`${API_URL}/dealer-stock/sell/`, {
+      method: "POST",
+      headers: {
+        'Authorization': `Token ${user?.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to mark stock as sold");
+    }
+  } catch (error: any) {
+    console.error("Error marking stock as sold:", error);
+    toast({
+      title: "Warning",
+      description: "Installation saved but stock could not be marked as sold. Please contact support.",
+      variant: "destructive",
+    });
+  }
+};
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check if user is authenticated
     if (!user?.token) {
       toast({ 
         title: "Authentication Error", 
@@ -229,7 +284,6 @@ export default function MachineInstallation() {
     setSubmitting(true);
     const fd = new FormData();
     
-    // Format dates properly for the API
     const formattedInstallationDate = new Date(form.installationDate).toISOString().split('T')[0];
     const formattedPurchaseDate = form.purchaseDate ? new Date(form.purchaseDate).toISOString().split('T')[0] : '';
     
@@ -250,12 +304,18 @@ export default function MachineInstallation() {
       fd.append("purchase_date", formattedPurchaseDate);
     }
 
-    if (user?.companyId) fd.append("company", String(user.companyId));
-    if (user?.dealerId) fd.append("dealer", String(user.dealerId));
+    // Send ONLY dealer OR company, never both
+    if (user.dealerId) {
+      fd.append("dealer", String(user.dealerId));
+    } else if (user.companyId) {
+      fd.append("company", String(user.companyId));
+    }
 
-    fd.append("submitted_by", String(user?.id));
+    // ALWAYS send submitted_by fields using current user data
+    fd.append("submitted_by", String(user.id || ''));
     fd.append("submitted_by_name", user?.name ?? "");
     fd.append("submitted_by_role", user?.role ?? "");
+
     photos.forEach((p) => fd.append("photo_files", p));
 
     try {
@@ -267,10 +327,8 @@ export default function MachineInstallation() {
         body: fd,
       });
       
-      // Check if response is JSON before trying to parse it
-      const contentType = res.headers.get("content-type");
       let responseData;
-      
+      const contentType = res.headers.get("content-type");
       if (contentType && contentType.includes("application/json")) {
         responseData = await res.json();
       } else {
@@ -286,7 +344,13 @@ export default function MachineInstallation() {
         );
       }
 
-      toast({ title: "Success", description: "Installation saved successfully" });
+      await markStockAsSold(form.batchNumber, {
+  item_name: form.itemName,
+  item_code: form.itemCode,
+  invoice_number: form.invoiceNumber,
+  purchase_date: form.purchaseDate
+});
+      toast({ title: "Success", description: "Installation saved and stock updated successfully" });
       navigate("/machines");
     } catch (err: any) {
       console.error("Submission error:", err);
@@ -300,7 +364,6 @@ export default function MachineInstallation() {
     }
   };
 
-  // Fix: Show access denied only if user exists but doesn't have permission
   if (user && !canAccess) {
     return (
       <DashboardLayout>
@@ -328,55 +391,40 @@ export default function MachineInstallation() {
 
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-6">
-              {/* Batch Number Lookup */}
-              <div className="border-b pb-4 space-y-4">
-                <h3 className="font-medium">Machine Verification</h3>
-                <div className="flex items-end gap-4">
-                  <div className="flex-grow space-y-2">
-                    <Label htmlFor="batchInput">Batch Number *</Label>
-                    <Input
-                      id="batchInput"
-                      name="batchInput"
-                      value={batchInput}
-                      onChange={(e) => setBatchInput(e.target.value)}
-                      disabled={isSubmitting}
-                      required
-                      placeholder="Enter machine batch number"
-                    />
+              {!prefillData?.prefillFromSell && (
+                <div className="border-b pb-4 space-y-4">
+                  <h3 className="font-medium">Machine Verification</h3>
+                  <div className="flex items-end gap-4">
+                    <div className="flex-grow space-y-2">
+                      <Label htmlFor="batchInput">Batch Number *</Label>
+                      <Input
+                        id="batchInput"
+                        name="batchInput"
+                        value={batchInput}
+                        onChange={(e) => setBatchInput(e.target.value)}
+                        disabled={isSubmitting}
+                        required
+                        placeholder="Enter machine batch number"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={fetchMachineDetails}
+                      disabled={isSubmitting || !batchInput || !user?.token}
+                      className="flex items-center gap-2"
+                    >
+                      <Search className="h-4 w-4" /> Get Details
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    onClick={fetchMachineDetails}
-                    disabled={isSubmitting || !batchInput || !user?.token}
-                    className="flex items-center gap-2"
-                  >
-                    <Search className="h-4 w-4" /> Get Details
-                  </Button>
+                  {detailsFetched && (
+                    <p className="text-sm text-green-600 flex items-center gap-1 mt-2">
+                      <CheckCircle2 className="h-4 w-4" /> Details fetched for batch:{" "}
+                      <span className="font-semibold">{form.batchNumber}</span>
+                    </p>
+                  )}
                 </div>
-                {detailsFetched && (
-                  <p className="text-sm text-green-600 flex items-center gap-1 mt-2">
-                    <CheckCircle2 className="h-4 w-4" /> Details fetched for batch:{" "}
-                    <span className="font-semibold">{form.batchNumber}</span>
-                  </p>
-                )}
-                {isCompanyUser && (
-                  <p className="text-sm text-blue-600 mt-2">
-                    As a company user, you can edit machine details below.
-                  </p>
-                )}
-                {isDealerUser && (
-                  <p className="text-sm text-blue-600 mt-2">
-                    As a dealer user, machine details are auto-filled and cannot be edited.
-                  </p>
-                )}
-                {!user?.token && (
-                  <p className="text-sm text-red-600 mt-2">
-                    Authentication error. Please refresh the page or log in again.
-                  </p>
-                )}
-              </div>
+              )}
 
-              {/* Machine Details */}
               <div className="border-b pb-4 space-y-4">
                 <h3 className="font-medium">Machine Details</h3>
                 <div className="grid grid-cols-2 gap-4">
@@ -389,7 +437,6 @@ export default function MachineInstallation() {
                       onChange={handleChange} 
                       disabled={isSubmitting || (isDealerUser && detailsFetched)}
                       required 
-                      placeholder="Auto-filled after batch lookup" 
                     />
                   </div>
                   <div className="space-y-2">
@@ -401,7 +448,6 @@ export default function MachineInstallation() {
                       onChange={handleChange} 
                       disabled={isSubmitting || (isDealerUser && detailsFetched)}
                       required 
-                      placeholder="Auto-filled after batch lookup" 
                     />
                   </div>
                   <div className="space-y-2">
@@ -413,7 +459,6 @@ export default function MachineInstallation() {
                       onChange={handleChange} 
                       disabled={isSubmitting || (isDealerUser && detailsFetched)}
                       required 
-                      placeholder="Auto-filled after batch lookup" 
                     />
                   </div>
                   <div className="space-y-2">
@@ -429,9 +474,18 @@ export default function MachineInstallation() {
                     />
                   </div>
                 </div>
+                {isCompanyUser && (
+                  <p className="text-sm text-blue-600 mt-2">
+                    As a company user, you can edit machine details above.
+                  </p>
+                )}
+                {isDealerUser && (
+                  <p className="text-sm text-blue-600 mt-2">
+                    As a dealer user, machine details are auto-filled and cannot be edited.
+                  </p>
+                )}
               </div>
 
-              {/* Client Information */}
               <div className="border-b pb-4 space-y-4">
                 <h3 className="font-medium">Client Information</h3>
                 <div className="grid grid-cols-2 gap-4">
@@ -456,7 +510,6 @@ export default function MachineInstallation() {
                 </div>
               </div>
 
-              {/* Installation Details */}
               <div className="border-b pb-4 space-y-4">
                 <h3 className="font-medium">Installation Details</h3>
                 <div className="grid grid-cols-2 gap-4">
@@ -476,7 +529,6 @@ export default function MachineInstallation() {
                 </div>
               </div>
 
-              {/* Photos Upload */}
               <div className="border-b pb-4 space-y-4">
                 <h3 className="font-medium">Installation Photos</h3>
                 <div className="space-y-4">
@@ -532,7 +584,6 @@ export default function MachineInstallation() {
                 </div>
               </div>
 
-              {/* Notes */}
               <div className="space-y-2">
                 <Label htmlFor="notes">Additional Notes</Label>
                 <Textarea id="notes" name="notes" rows={4} value={form.notes} onChange={handleChange} disabled={isSubmitting} />
@@ -543,7 +594,7 @@ export default function MachineInstallation() {
               <Button type="button" variant="outline" onClick={() => navigate("/machines")} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting || (!detailsFetched && isDealerUser) || !user?.token}>
+              <Button type="submit" disabled={isSubmitting || (!detailsFetched && isDealerUser && !prefillData?.prefillFromSell) || !user?.token}>
                 {isSubmitting ? "Submitting..." : "Submit Installation"}
               </Button>
             </CardFooter>
