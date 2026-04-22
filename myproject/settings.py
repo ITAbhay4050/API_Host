@@ -128,8 +128,10 @@ DATABASES = {
         },
     },
 }
-
-DATABASE_ROUTERS = ['api.db_routers.Munim006Router']
+DATABASE_ROUTERS = [
+    'api.db_routers.Munim006Router',
+    'api.db_routers.Munim008Router',   # 👈 add this
+]
 
 # -----------------------------------------------------------------------------
 # Password validation

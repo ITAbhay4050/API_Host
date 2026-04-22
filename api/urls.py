@@ -8,7 +8,7 @@ from .views import (
     DealerMyStockView,DealerSoldStockView,
     CompanyDealerStockView,
     AddDealerStockByCompany,SellDealerStockView,ReturnDealerStockView,
-    DealerStockAuditView,
+    DealerStockAuditView,PurchaseOrderViewSet, ItemSearchViewSet
 )
 router = DefaultRouter()
 router.register(r'tasks', views.TaskViewSet, basename='task')
@@ -16,8 +16,12 @@ router.register(r'employees', views.EmployeeViewSet, basename='employee')
 router.register(r"ticket-categories", views.TicketCategoryViewSet)
 router.register(r"tickets", views.TicketViewSet)
 router.register(r"users", views.UserRoleViewSet, basename="user")
+po_router = DefaultRouter()
+po_router.register('orders', PurchaseOrderViewSet, basename='purchase-order')
+po_router.register('items', ItemSearchViewSet, basename='item-master')
 
 urlpatterns = [
+    path('purchase/', include(po_router.urls)),
     # Authentication & Registration
     path("register/company/", views.RegisterCompany.as_view(), name="register_company"),
     path("companies/", views.CompanyListView.as_view(), name="company_list"),
@@ -28,6 +32,7 @@ urlpatterns = [
     path("verify-otp/", views.VerifyOTPView.as_view(), name="verify_otp"),
 
     # Dealers
+
     path("dealers/", views.DealerListView.as_view(), name="dealer_list"),
     path("dealers/<int:pk>/", views.DealerDetailView.as_view(), name="dealer_detail"),
     path("dealers/count/", views.DealerCountView.as_view(), name="dealer_count"),
@@ -60,4 +65,8 @@ urlpatterns = [
     path('dealer-stock/sell/', SellDealerStockView.as_view(), name='sell-dealer-stock'),
     path('dealer-stock/return/', ReturnDealerStockView.as_view(), name='return-dealer-stock'),
     path('dealer-stock/sold/', DealerSoldStockView.as_view(), name='dealer-sold-stock'),
+    path('purchase/orders/<int:pk>/confirm/', PurchaseOrderViewSet.as_view({'post': 'confirm'}), name='purchase-order-confirm'),
+    path('purchase/', include(po_router.urls)),
+    #path('api/purchase/', include('purchase_order.urls')),
+     
 ]

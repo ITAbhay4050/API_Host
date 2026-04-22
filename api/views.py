@@ -1,8 +1,9 @@
 # views.py (final, fully corrected)
-from rest_framework import status, permissions, serializers, viewsets, generics
+from rest_framework import status, permissions, serializers, viewsets, generics,permissions
 from rest_framework.authentication import TokenAuthentication
-from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes, action
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -20,16 +21,17 @@ from django.conf import settings
 from .models import (
     Company, Dealer, Employee, LoginRecord,
     MachineInstallation, InstallationPhoto, Task, AccountMaster, ticket, TicketCategory, Department,
-    DealerStockAudit, DealerStockMaster, DealerStockSyncLog, DealerStockReturn
+    DealerStockAudit, DealerStockMaster, DealerStockSyncLog, DealerStockReturn,PurchaseOrder, PurchaseOrderConfirmation, ItemMaster
 )
 from .serializers import (
     CompanySerializer, DealerSerializer, EmployeeSerializer, TicketSerializer,
     TicketCategorySerializer, DepartmentSerializer, DealerStockMasterSerializer,
     DealerStockAuditSerializer, MachineInstallationSerializer, TaskSerializer,
-    AccountMasterSerializer, UserRoleSerializer
+    AccountMasterSerializer, UserRoleSerializer, PurchaseOrderSerializer, PurchaseOrderCreateSerializer,
+    PurchaseOrderConfirmationSerializer, ItemMasterSerializer
 )
 from .utils import generate_otp, send_otp_email
-
+from api.permissions import IsDealerUser, IsCompanyUser, IsSystemAdmin
 
 # -------------------------------------------------------------------
 # Helper – create dummy auth_user for DRF Token
@@ -1506,3 +1508,172 @@ class DealerSoldStockView(APIView):
             })
 
         return Response(data, status=200)
+class ItemSearchViewSet(viewsets.GenericViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ItemMasterSerializer
+
+    def get_queryset(self):
+        # Force using the correct database (same as admin)
+        return ItemMaster.objects.using('munim008_db').all()
+
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        query = request.query_params.get('q', '')
+        # Allowed ItemGroupMasterId values
+        allowed_group_ids = [2,3,5,8,10,11,12,13,14,16,29,20077,40103,40105,40107]
+
+        base_qs = ItemMaster.objects.using('munim008_db').filter(itemgroupmasterid__in=allowed_group_ids)
+
+        if len(query) >= 2:
+            base_qs = base_qs.filter(
+                Q(itemname__icontains=query) | Q(itemcode__icontains=query)
+            )
+        else:
+            base_qs = base_qs.none()  # no results for short queries
+
+        items = base_qs[:20]
+        serializer = self.get_serializer(items, many=True)
+        return Response(serializer.data)
+
+
+class PurchaseOrderViewSet(viewsets.ModelViewSet):
+    serializer_class = PurchaseOrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_user_context(self, user):
+        """
+        Returns (user_type, role, dealer, company, employee)
+        """
+        email = user.email
+
+        emp = Employee.objects.filter(email=email).first()
+        if emp:
+            return ('employee', emp.role, emp.dealer, emp.company, emp)
+
+        dealer = Dealer.objects.filter(email=email).first()
+        if dealer:
+            return ('dealer', 'DEALER_ADMIN', dealer, dealer.company, None)
+
+        company = Company.objects.filter(email=email).first()
+        if company:
+            return ('company', 'COMPANY_ADMIN', None, company, None)
+
+        return (None, None, None, None, None)
+
+    def get_queryset(self):
+        user_type, role, dealer, company, _ = self.get_user_context(self.request.user)
+
+        if not user_type:
+            return PurchaseOrder.objects.none()
+
+        if role == 'APPLICATION_ADMIN':
+            return PurchaseOrder.objects.all()
+
+        elif role in ['COMPANY_ADMIN', 'COMPANY_EMPLOYEE']:
+            return PurchaseOrder.objects.filter(dealer__company=company)
+
+        elif role in ['DEALER_ADMIN', 'DEALER_EMPLOYEE']:
+            return PurchaseOrder.objects.filter(dealer=dealer)
+
+        return PurchaseOrder.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        user_type, role, dealer, company, employee = self.get_user_context(request.user)
+
+        if not user_type:
+            return Response({"detail": "User not recognized."}, status=status.HTTP_403_FORBIDDEN)
+
+        allowed_roles = ['DEALER_ADMIN', 'DEALER_EMPLOYEE', 'COMPANY_ADMIN', 'APPLICATION_ADMIN']
+        if role not in allowed_roles:
+            return Response({"detail": "Not authorized to create orders."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Determine dealer
+        if user_type in ['employee', 'dealer'] and role in ['DEALER_ADMIN', 'DEALER_EMPLOYEE']:
+            order_dealer = dealer
+            if not order_dealer:
+                return Response({"detail": "Dealer not assigned."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            dealer_id = request.data.get('dealer_id')
+            if not dealer_id:
+                return Response({"detail": "dealer_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                order_dealer = Dealer.objects.get(id=dealer_id)
+            except Dealer.DoesNotExist:
+                return Response({"detail": "Invalid dealer_id."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if user_type == 'company' and order_dealer.company != company:
+                return Response({"detail": "Dealer does not belong to your company."},
+                                status=status.HTTP_403_FORBIDDEN)
+
+        serializer = PurchaseOrderCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        created_by_employee = employee if user_type == 'employee' else None
+
+        order = PurchaseOrder.objects.create(
+            dealer=order_dealer,
+            created_by=created_by_employee,
+            **serializer.validated_data
+        )
+
+        return Response(PurchaseOrderSerializer(order).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def confirm(self, request, pk=None):
+        user_type, role, dealer, company, employee = self.get_user_context(request.user)
+
+        # Permission check
+        allowed = False
+        if user_type == 'employee' and role in ['COMPANY_ADMIN', 'COMPANY_EMPLOYEE', 'APPLICATION_ADMIN']:
+            allowed = True
+        elif user_type == 'company':
+            allowed = True
+
+        if not allowed:
+            return Response({"detail": "Only company users can confirm orders."}, status=403)
+
+        order = self.get_object()
+
+        quantity = request.data.get('confirmed_quantity')
+        if not quantity or int(quantity) <= 0:
+            return Response({"error": "Valid positive quantity required."}, status=400)
+
+        quantity = int(quantity)
+
+        if quantity > order.pending_quantity:
+            return Response({
+                "error": f"Cannot confirm more than pending quantity ({order.pending_quantity})."
+            }, status=400)
+
+        new_pending = order.pending_quantity - quantity
+
+        confirmation = PurchaseOrderConfirmation.objects.create(
+            purchase_order=order,
+            confirmed_quantity=quantity,
+            confirmed_by=employee,  # can be None
+            pending_after=new_pending
+        )
+
+        order.pending_quantity = new_pending
+
+        if new_pending == 0:
+            order.status = 'completed'
+        elif new_pending < order.order_quantity:
+            order.status = 'partially_completed'
+
+        order.save()
+
+        return Response({
+            "message": f"Confirmed {quantity} units.",
+            "pending_quantity": order.pending_quantity,
+            "status": order.status,
+            "confirmation": PurchaseOrderConfirmationSerializer(confirmation).data
+        })
+
+    @action(detail=True, methods=['get'])
+    def confirmations(self, request, pk=None):
+        order = self.get_object()
+        confirmations = order.confirmations.all()
+        serializer = PurchaseOrderConfirmationSerializer(confirmations, many=True)
+        return Response(serializer.data)

@@ -1,9 +1,9 @@
 from django.contrib import admin
 from django.contrib import messages
 from django.db.models import Q
-from .models import Company, Dealer, LoginRecord, MachineInstallation, Task, Employee
+from .models import Company, Dealer, LoginRecord, MachineInstallation, Task, Employee,ItemMaster
 from django.contrib.auth.hashers import make_password
-from .models import SalesInvoice,ticket,TicketCategory
+from .models import SalesInvoice,ticket,TicketCategory, PurchaseOrder, PurchaseOrderConfirmation
 from django.contrib.contenttypes.models import ContentType
 from django import forms
 from django.core.exceptions import ValidationError # Import ValidationError
@@ -357,3 +357,36 @@ class TicketAdmin(admin.ModelAdmin):
 
 admin.site.register(TicketCategory)
 
+@admin.register(PurchaseOrder)
+class PurchaseOrderAdmin(admin.ModelAdmin):
+    list_display = ['id', 'dealer', 'item_name', 'order_quantity', 'pending_quantity', 'status', 'created_at']
+    list_filter = ['status', 'created_at']
+    search_fields = ['dealer__name', 'item_name', 'item_code']
+
+@admin.register(PurchaseOrderConfirmation)
+class PurchaseOrderConfirmationAdmin(admin.ModelAdmin):
+    list_display = ['id', 'purchase_order', 'confirmed_quantity', 'confirmed_by', 'confirmed_at']
+@admin.register(ItemMaster)
+class ItemMasterAdmin(admin.ModelAdmin):
+    list_display = ['itemname', 'itemcode', 'productcode', 'itemgroupmasterid']
+    search_fields = ['itemname', 'itemcode']
+    list_filter = ['itemgroupmasterid']
+
+    def get_queryset(self, request):
+        # Force using the 'munim008_db' database for this read‑only model
+        return super().get_queryset(request).using('munim008_db')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if 'delete_selected' in actions:
+            del actions['delete_selected']
+        return actions

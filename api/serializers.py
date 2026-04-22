@@ -5,6 +5,7 @@ Updated with proper ItemMaster joins for dealer GST validation.
 from datetime import timedelta
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password
+from .models import PurchaseOrder, PurchaseOrderConfirmation, ItemMaster
 from django.utils import timezone
 from rest_framework import serializers
 from .models import DealerStockMaster, DealerStockAudit
@@ -534,3 +535,42 @@ class DealerStockAuditSerializer(serializers.ModelSerializer):
     class Meta:
         model = DealerStockAudit
         fields = '__all__'
+class ItemMasterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemMaster
+        fields = ['itemname', 'itemcode', 'productcode']
+
+class PurchaseOrderSerializer(serializers.ModelSerializer):
+    dealer_name = serializers.CharField(source='dealer.name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.name', read_only=True)
+    confirmations = serializers.PrimaryKeyRelatedField(read_only=True, many=True)
+
+    class Meta:
+        model = PurchaseOrder
+        fields = [
+            'id', 'dealer', 'dealer_name', 'item_name', 'item_code', 'product_code',
+            'order_quantity', 'pending_quantity', 'remarks', 'created_by', 'created_by_name',
+            'created_at', 'status', 'confirmations'
+        ]
+        read_only_fields = ['pending_quantity', 'status', 'created_at', 'created_by']
+
+class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PurchaseOrder
+        fields = ['item_name', 'item_code', 'product_code', 'order_quantity', 'remarks']
+
+    def validate_order_quantity(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Quantity must be positive.")
+        return value
+
+class PurchaseOrderConfirmationSerializer(serializers.ModelSerializer):
+    confirmed_by_name = serializers.CharField(source='confirmed_by.name', read_only=True)
+
+    class Meta:
+        model = PurchaseOrderConfirmation
+        fields = ['id', 'confirmed_quantity', 'confirmed_by', 'confirmed_by_name', 'confirmed_at', 'pending_after']
+class ItemMasterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemMaster
+        fields = ['itemname', 'itemcode', 'productcode']

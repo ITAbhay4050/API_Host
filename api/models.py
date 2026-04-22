@@ -610,10 +610,91 @@ class DealerStockReturn(models.Model):
 
     def __str__(self):
         return f"{self.batch_number} returned by {self.returned_by_name}"
-    
-# class purchaseorder (models.Model):
-#     ItemName = models.TextField()
-#     ItemCode  = models.CharField(max_length=30)
-#     Product_Code = models.CharField(max_length=30)
-#     OrderQuantity = models.CharField()
-#     Remarks = models.TextField()
+class PurchaseOrder(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('partially_completed', 'Partially Completed'),
+        ('completed', 'Completed'),
+    ]
+
+    dealer = models.ForeignKey(Dealer, on_delete=models.CASCADE, related_name='purchase_orders')
+    item_name = models.CharField(max_length=255)
+    item_code = models.CharField(max_length=100)
+    product_code = models.CharField(max_length=100, blank=True)
+
+    order_quantity = models.PositiveIntegerField()
+    pending_quantity = models.PositiveIntegerField()
+    remarks = models.TextField(blank=True)
+
+    created_by = models.ForeignKey(
+    Employee,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,          # 👈 add this
+    related_name='created_orders'
+)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def clean(self):
+        if self.pending_quantity > self.order_quantity:
+            raise ValidationError('Pending quantity cannot exceed original order quantity.')
+        if self.order_quantity <= 0:
+            raise ValidationError('Order quantity must be positive.')
+
+    def save(self, *args, **kwargs):
+        # Auto-set pending_quantity on creation
+        if not self.pk:
+            self.pending_quantity = self.order_quantity
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"PO #{self.id} - {self.dealer.name} - {self.item_name}"
+
+
+class PurchaseOrderConfirmation(models.Model):
+    """
+    Records every partial/full confirmation made by a company user.
+    """
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='confirmations')
+    confirmed_quantity = models.PositiveIntegerField()
+    confirmed_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, related_name='order_confirmations')
+    confirmed_at = models.DateTimeField(auto_now_add=True)
+
+    # Snapshot of pending quantity after this confirmation (for audit)
+    pending_after = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ['confirmed_at']
+
+    def __str__(self):
+        return f"Confirmation {self.id} for PO {self.purchase_order.id}: +{self.confirmed_quantity}"
+class ItemMaster(models.Model):
+    """
+    READ-ONLY model for itemmaster table in munim008_db (LIVE PRODUCTION).
+    Absolutely no writes are allowed. Any attempt to save, update, or delete
+    will raise a RuntimeError.
+    """
+    itemname = models.CharField(max_length=255, db_column='itemname')
+    itemcode = models.CharField(max_length=100, db_column='itemcode', primary_key=True)
+    productcode = models.CharField(max_length=100, db_column='ProductCode')
+    itemgroupmasterid = models.IntegerField(db_column='ItemGroupMasterId', null=True, blank=True)
+
+    class Meta:
+        managed = False          # Django will not create/alter the table
+        db_table = 'itemmaster'
+        app_label = 'api'
+
+    def save(self, *args, **kwargs):
+        raise RuntimeError("ItemMaster is read-only. No modifications allowed.")
+
+    def delete(self, *args, **kwargs):
+        raise RuntimeError("ItemMaster is read-only. No deletions allowed.")
+
+    def __str__(self):
+        return f"{self.itemname} ({self.itemcode})"

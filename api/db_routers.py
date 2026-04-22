@@ -80,3 +80,32 @@ class Munim006Router:
         if model._meta.db_table == 'SalesInvoice':
             return 'munim006_db'
         return None
+
+class Munim008Router:
+    """
+    ItemMaster → ONLY READ from munim008_db
+    Everything else → default DB
+    """
+
+    def db_for_read(self, model, **hints):
+        if model._meta.model_name == 'itemmaster':
+            return 'munim008_db'
+        return 'default'
+
+    def db_for_write(self, model, **hints):
+        # ❌ NEVER allow write to munim008_db
+        if model._meta.model_name == 'itemmaster':
+            return None  # Django won't write, and model.save already blocked
+        return 'default'
+
+    def allow_relation(self, obj1, obj2, **hints):
+        # ✅ Only allow relation inside same DB
+        if obj1._state.db and obj2._state.db:
+            return obj1._state.db == obj2._state.db
+        return True
+
+    def allow_migrate(self, db, app_label, model_name=None, **hints):
+        # ❌ No migrations for ItemMaster in default
+        if model_name == 'itemmaster':
+            return db == 'munim008_db'
+        return db == 'default'
