@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { format } from 'date-fns';
-import { Search, Plus, Download, Eye } from 'lucide-react';
+import { Search, Plus, Download, Eye, Trash2, X } from 'lucide-react';
 import DashboardLayout from '../components/Layout/DashboardLayout';
 import { useAuth } from '../context/AuthContext';
 import { UserRole } from '../types';
@@ -11,11 +11,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import * as api from '../services/api';
 import debounce from 'lodash/debounce';
 
+// Helper for status badges
 const getStatusBadge = (status: string) => {
   const variants: Record<string, string> = {
     pending: 'bg-yellow-100 text-yellow-800',
@@ -25,6 +25,15 @@ const getStatusBadge = (status: string) => {
   const display = status === 'partially_completed' ? 'Partially Completed' : status.charAt(0).toUpperCase() + status.slice(1);
   return <Badge className={variants[status] || 'bg-gray-100'}>{display}</Badge>;
 };
+
+interface AddedItem {
+  id: string;
+  item_name: string;
+  item_code: string;
+  product_code: string;
+  order_quantity: number;
+  remarks: string;
+}
 
 const PurchaseOrders = () => {
   const { user: currentUser } = useAuth();
@@ -38,46 +47,41 @@ const PurchaseOrders = () => {
     [currentUser]
   );
   const isAdmin = useMemo(() => currentUser?.role === UserRole.APPLICATION_ADMIN, [currentUser]);
+  const canCreateOrder = useMemo(() => isDealerUser || isCompanyUser || isAdmin, [isDealerUser, isCompanyUser, isAdmin]);
 
-  const canCreateOrder = useMemo(
-    () => isDealerUser || isCompanyUser || isAdmin,
-    [isDealerUser, isCompanyUser, isAdmin]
-  );
-
+  // Orders listing state
   const [orders, setOrders] = useState<api.PurchaseOrder[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<api.PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(false);
-
-  // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDealer, setFilterDealer] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [dealersList, setDealersList] = useState<{ id: number; name: string }[]>([]);
 
-  // Create order dialog
+  // Create order modal state
   const [createOpen, setCreateOpen] = useState(false);
-  const [newOrder, setNewOrder] = useState({
-    dealer_id: undefined as number | undefined,
-    item_name: '',
-    item_code: '',
-    product_code: '',
-    order_quantity: 0,
-    remarks: '',
-  });
-  const [itemSearch, setItemSearch] = useState('');
-  const [itemSuggestions, setItemSuggestions] = useState<api.ItemMaster[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-
-  // For company/system admin to select dealer
+  const [selectedDealerId, setSelectedDealerId] = useState<number | undefined>(undefined);
   const [availableDealers, setAvailableDealers] = useState<{ id: number; name: string }[]>([]);
 
-  // Confirmation dialog
+  // New item entry fields
+  const [itemSearchQuery, setItemSearchQuery] = useState('');
+  const [itemSuggestions, setItemSuggestions] = useState<api.ItemMaster[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<api.ItemMaster | null>(null);
+  const [quantity, setQuantity] = useState<number>(0);
+  const [remarks, setRemarks] = useState('');
+
+  // List of added items (to be submitted)
+  const [addedItems, setAddedItems] = useState<AddedItem[]>([]);
+
+  // Confirmation & history
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<api.PurchaseOrder | null>(null);
   const [confirmQuantity, setConfirmQuantity] = useState<number>(0);
   const [confirmHistory, setConfirmHistory] = useState<api.Confirmation[]>([]);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
 
+  // --- Data fetching ---
   const loadOrders = async () => {
     setLoading(true);
     try {
@@ -89,25 +93,13 @@ const PurchaseOrders = () => {
       setLoading(false);
     }
   };
+  useEffect(() => { loadOrders(); }, []);
 
   useEffect(() => {
-    loadOrders();
-  }, []);
-
-  // Load dealers for company/admin
-  useEffect(() => {
-  if ((isCompanyUser || isAdmin) && !availableDealers.length) {
-    const loadDealers = async () => {
-      try {
-        const dealers = await api.fetchDealers();
-        setAvailableDealers(dealers);
-      } catch (err) {
-        console.error("Failed to load dealers:", err);
-      }
-    };
-    loadDealers();
-  }
-}, [isCompanyUser, isAdmin, availableDealers.length]);
+    if ((isCompanyUser || isAdmin) && !availableDealers.length) {
+      api.fetchDealers().then(setAvailableDealers).catch(console.error);
+    }
+  }, [isCompanyUser, isAdmin, availableDealers.length]);
 
   useEffect(() => {
     if ((isCompanyUser || isAdmin) && orders.length) {
@@ -116,6 +108,7 @@ const PurchaseOrders = () => {
     }
   }, [orders, isCompanyUser, isAdmin]);
 
+  // Filter orders
   useEffect(() => {
     let filtered = [...orders];
     if (searchTerm) {
@@ -128,7 +121,8 @@ const PurchaseOrders = () => {
     setFilteredOrders(filtered);
   }, [orders, searchTerm, filterDealer, filterStatus]);
 
-  const debouncedItemSearch = useMemo(
+  // Debounced item search (single search bar)
+  const debouncedSearch = useMemo(
     () => debounce(async (query: string) => {
       if (query.length >= 2) {
         const results = await api.itemSearch(query);
@@ -143,55 +137,85 @@ const PurchaseOrders = () => {
   );
 
   useEffect(() => {
-    debouncedItemSearch(itemSearch);
-    return () => debouncedItemSearch.cancel();
-  }, [itemSearch, debouncedItemSearch]);
+    debouncedSearch(itemSearchQuery);
+    return () => debouncedSearch.cancel();
+  }, [itemSearchQuery, debouncedSearch]);
 
+  // Select an item from suggestions
   const handleSelectItem = (item: api.ItemMaster) => {
-    setNewOrder({
-      ...newOrder,
-      item_name: item.itemname,
-      item_code: item.itemcode,
-      product_code: item.productcode,
-    });
-    setItemSearch(item.itemname);
+    setSelectedItem(item);
+    setItemSearchQuery(item.itemname);
     setShowSuggestions(false);
   };
 
-  const handleCreateOrder = async () => {
-    if (newOrder.order_quantity <= 0) {
-      alert('Please enter a valid quantity');
+  // Clear selection
+  const clearSelection = () => {
+    setSelectedItem(null);
+    setItemSearchQuery('');
+    setQuantity(0);
+    setRemarks('');
+  };
+
+  // Add current item to the list
+  const addItemToList = () => {
+    if (!selectedItem) {
+      alert('Please select an item first.');
       return;
     }
+    if (quantity <= 0) {
+      alert('Quantity must be greater than zero.');
+      return;
+    }
+
+    const newItem: AddedItem = {
+      id: crypto.randomUUID(),
+      item_name: selectedItem.itemname,
+      item_code: selectedItem.itemcode,
+      product_code: selectedItem.productcode,
+      order_quantity: quantity,
+      remarks: remarks,
+    };
+    setAddedItems(prev => [...prev, newItem]);
+    // Reset entry fields
+    clearSelection();
+  };
+
+  // Remove an item from the list
+  const removeItem = (id: string) => {
+    setAddedItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  // Submit the entire order
+  const handleCreateOrder = async () => {
+    if (addedItems.length === 0) {
+      alert('Please add at least one item to the order.');
+      return;
+    }
+    if (!isDealerUser && !selectedDealerId) {
+      alert('Please select a dealer.');
+      return;
+    }
+
+    const payload: any = {
+      items: addedItems.map(({ item_name, item_code, product_code, order_quantity, remarks }) => ({
+        item_name, item_code, product_code, order_quantity, remarks
+      }))
+    };
+    if (!isDealerUser && selectedDealerId) payload.dealer_id = selectedDealerId;
+
     try {
-      const payload: any = {
-        item_name: newOrder.item_name,
-        item_code: newOrder.item_code,
-        product_code: newOrder.product_code,
-        order_quantity: newOrder.order_quantity,
-        remarks: newOrder.remarks,
-      };
-      // Add dealer_id only if the user is not a dealer (company or admin)
-      if (!isDealerUser && newOrder.dealer_id) {
-        payload.dealer_id = newOrder.dealer_id;
-      }
       await api.createOrder(payload);
       setCreateOpen(false);
-      setNewOrder({
-        dealer_id: undefined,
-        item_name: '',
-        item_code: '',
-        product_code: '',
-        order_quantity: 0,
-        remarks: '',
-      });
-      setItemSearch('');
+      setAddedItems([]);
+      setSelectedDealerId(undefined);
+      clearSelection();
       loadOrders();
     } catch (err) {
-      alert('Failed to create order');
+      alert('Failed to create orders');
     }
   };
 
+  // Confirmation handlers
   const handleConfirmOrder = async () => {
     if (!selectedOrder) return;
     if (confirmQuantity <= 0 || confirmQuantity > selectedOrder.pending_quantity) {
@@ -237,20 +261,24 @@ const PurchaseOrders = () => {
   return (
     <DashboardLayout>
       <div className="p-8 space-y-6">
-        <div className="flex justify-between items-center">
+        {/* Header */}
+        <div className="flex justify-between items-center flex-wrap gap-4">
           <h2 className="text-3xl font-bold">Purchase Orders</h2>
-          {canCreateOrder && (
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" /> Create Order
-            </Button>
-          )}
-          {(isCompanyUser || isAdmin) && (
-            <Button variant="outline" onClick={exportToCSV}>
-              <Download className="h-4 w-4 mr-2" /> Export CSV
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {canCreateOrder && (
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" /> Create Order
+              </Button>
+            )}
+            {(isCompanyUser || isAdmin) && (
+              <Button variant="outline" onClick={exportToCSV}>
+                <Download className="h-4 w-4 mr-2" /> Export CSV
+              </Button>
+            )}
+          </div>
         </div>
 
+        {/* Filters */}
         {(isCompanyUser || isAdmin) && (
           <Card>
             <CardContent className="pt-6">
@@ -280,90 +308,221 @@ const PurchaseOrders = () => {
           </Card>
         )}
 
+        {/* Orders Table */}
         <Card>
           <CardHeader><CardTitle>Orders</CardTitle><CardDescription>List of all purchase orders</CardDescription></CardHeader>
           <CardContent>
             {loading ? <div className="py-8 text-center">Loading...</div> : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Dealer</TableHead>
-                    <TableHead>Item</TableHead>
-                    <TableHead>Item Code</TableHead>
-                    <TableHead>Order Qty</TableHead>
-                    <TableHead>Pending</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Order Date</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredOrders.map(order => (
-                    <TableRow key={order.id}>
-                      <TableCell>{order.dealer_name}</TableCell>
-                      <TableCell>{order.item_name}</TableCell>
-                      <TableCell>{order.item_code}</TableCell>
-                      <TableCell>{order.order_quantity}</TableCell>
-                      <TableCell>{order.pending_quantity}</TableCell>
-                      <TableCell>{getStatusBadge(order.status)}</TableCell>
-                      <TableCell>{format(new Date(order.created_at), 'PPP')}</TableCell>
-                      <TableCell className="space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => showHistory(order)}><Eye className="h-3 w-3 mr-1" /> History</Button>
-                        {(isCompanyUser || isAdmin) && order.status !== 'completed' && (
-                          <Button size="sm" onClick={() => { setSelectedOrder(order); setConfirmQuantity(0); setConfirmDialogOpen(true); }}>
-                            Confirm
-                          </Button>
-                        )}
-                      </TableCell>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Dealer</TableHead>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Item Code</TableHead>
+                      <TableHead>Order Qty</TableHead>
+                      <TableHead>Pending</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Order Date</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredOrders.map(order => (
+                      <TableRow key={order.id}>
+                        <TableCell className="font-medium">{order.dealer_name}</TableCell>
+                        <TableCell>{order.item_name}</TableCell>
+                        <TableCell>{order.item_code}</TableCell>
+                        <TableCell>{order.order_quantity}</TableCell>
+                        <TableCell>{order.pending_quantity}</TableCell>
+                        <TableCell>{getStatusBadge(order.status)}</TableCell>
+                        <TableCell>{format(new Date(order.created_at), 'PPP')}</TableCell>
+                        <TableCell className="space-x-2 whitespace-nowrap">
+                          <Button size="sm" variant="outline" onClick={() => showHistory(order)}><Eye className="h-3 w-3 mr-1" /> History</Button>
+                          {(isCompanyUser || isAdmin) && order.status !== 'completed' && (
+                            <Button size="sm" onClick={() => { setSelectedOrder(order); setConfirmQuantity(0); setConfirmDialogOpen(true); }}>
+                              Confirm
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {filteredOrders.length === 0 && (
+                      <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No orders found.</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Create Order Dialog */}
+      {/* ========== CREATE ORDER MODAL ========== */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-[550px]">
-          <DialogHeader><DialogTitle>Create Purchase Order</DialogTitle></DialogHeader>
-          <div className="space-y-4">
+        <DialogContent className="w-[90vw] max-w-[90vw] h-[85vh] max-h-[85vh] p-0 flex flex-col">
+          <DialogHeader className="px-6 py-4 border-b sticky top-0 bg-white z-10">
+            <DialogTitle className="text-2xl">Create Purchase Order</DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
             {/* Dealer selector for company/admin */}
             {!isDealerUser && (isCompanyUser || isAdmin) && (
-              <div>
-                <Label>Select Dealer *</Label>
-                <Select value={newOrder.dealer_id?.toString()} onValueChange={(val) => setNewOrder({ ...newOrder, dealer_id: parseInt(val) })}>
-                  <SelectTrigger><SelectValue placeholder="Choose dealer" /></SelectTrigger>
+              <div className="w-full md:w-1/2">
+                <Label className="text-base font-semibold">Select Dealer *</Label>
+                <Select value={selectedDealerId?.toString()} onValueChange={(val) => setSelectedDealerId(parseInt(val))}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Choose dealer" /></SelectTrigger>
                   <SelectContent>
                     {availableDealers.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             )}
-            <div>
-              <Label>Search Item</Label>
-              <Input value={itemSearch} onChange={e => setItemSearch(e.target.value)} placeholder="Type item name or code..." />
-              {showSuggestions && itemSuggestions.length > 0 && (
-                <div className="border rounded mt-1 max-h-48 overflow-auto">
-                  {itemSuggestions.map(item => (
-                    <div key={item.itemcode} className="p-2 hover:bg-gray-100 cursor-pointer" onClick={() => handleSelectItem(item)}>
-                      {item.itemname} ({item.itemcode})
-                    </div>
-                  ))}
+
+            {/* Item selection section */}
+            <div className="border rounded-lg p-5 bg-gray-50 space-y-4">
+              <h3 className="text-lg font-semibold">Add New Item</h3>
+
+              {/* Search input */}
+              <div className="relative">
+                <Label className="text-sm font-medium mb-1 block">Search Item *</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={itemSearchQuery}
+                    onChange={(e) => setItemSearchQuery(e.target.value)}
+                    placeholder="Type item name or code..."
+                    className="w-full h-12 pl-10 pr-3 py-2 text-base border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    autoComplete="off"
+                  />
+                </div>
+                {showSuggestions && itemSuggestions.length > 0 && (
+                  <div className="absolute z-50 left-0 right-0 mt-1 bg-white border rounded-md shadow-lg max-h-64 overflow-auto">
+                    {itemSuggestions.map(sug => (
+                      <div
+                        key={sug.itemcode}
+                        className="p-3 hover:bg-gray-100 cursor-pointer border-b last:border-b-0"
+                        onClick={() => handleSelectItem(sug)}
+                      >
+                        <div className="font-semibold text-gray-800">{sug.itemname}</div>
+                        <div className="text-sm text-gray-500 mt-1">
+                          <span className="inline-block mr-3">Code: {sug.itemcode}</span>
+                          {sug.productcode && <span>Product: {sug.productcode}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Selected item preview (read-only) */}
+              {selectedItem && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 bg-white rounded border">
+                  <div>
+                    <Label className="text-xs text-gray-500">Item Name</Label>
+                    <div className="font-medium">{selectedItem.itemname}</div>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Item Code</Label>
+                    <div className="font-mono text-sm">{selectedItem.itemcode}</div>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Product Code</Label>
+                    <div className="font-mono text-sm">{selectedItem.productcode || '-'}</div>
+                  </div>
                 </div>
               )}
+
+              {/* Quantity and Remarks */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium">Quantity *</Label>
+                  <input
+                    type="number"
+                    value={quantity || ''}
+                    onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
+                    min={1}
+                    placeholder="Enter quantity"
+                    className="w-full h-10 px-3 py-2 text-base border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!selectedItem}
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Remarks (optional)</Label>
+                  <input
+                    type="text"
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    placeholder="Any notes"
+                    className="w-full h-10 px-3 py-2 text-base border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!selectedItem}
+                  />
+                </div>
+              </div>
+
+              {/* Add Item button */}
+              <Button
+                type="button"
+                onClick={addItemToList}
+                disabled={!selectedItem || quantity <= 0}
+                className="w-full md:w-auto"
+              >
+                <Plus className="h-4 w-4 mr-2" /> Add Item to Order
+              </Button>
             </div>
-            <div><Label>Item Name</Label><Input value={newOrder.item_name} readOnly /></div>
-            <div><Label>Item Code</Label><Input value={newOrder.item_code} readOnly /></div>
-            <div><Label>Product Code</Label><Input value={newOrder.product_code} readOnly /></div>
-            <div><Label>Order Quantity</Label><Input type="number" value={newOrder.order_quantity} onChange={e => setNewOrder({ ...newOrder, order_quantity: parseInt(e.target.value) || 0 })} /></div>
-            <div><Label>Remarks</Label><Textarea value={newOrder.remarks} onChange={e => setNewOrder({ ...newOrder, remarks: e.target.value })} /></div>
+
+            {/* Items list table */}
+            {addedItems.length > 0 && (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-gray-100 px-4 py-2 font-semibold">Items in this order</div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item Name</TableHead>
+                        <TableHead>Item Code</TableHead>
+                        <TableHead>Product Code</TableHead>
+                        <TableHead className="text-center">Qty</TableHead>
+                        <TableHead>Remarks</TableHead>
+                        <TableHead className="w-12"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {addedItems.map(item => (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium">{item.item_name}</TableCell>
+                          <TableCell>{item.item_code}</TableCell>
+                          <TableCell>{item.product_code || '-'}</TableCell>
+                          <TableCell className="text-center">{item.order_quantity}</TableCell>
+                          <TableCell>{item.remarks || '-'}</TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="icon" onClick={() => removeItem(item.id)}>
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </TableCell>
+                          
+                        </TableRow>
+                        
+                      ))}
+
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+              <div className="flex justify-end w-full gap-3">
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+              <Button onClick={handleCreateOrder} className="bg-green-600 hover:bg-green-700">
+                Submit Order ({addedItems.length} items)
+              </Button>
+            </div>
           </div>
-          <DialogFooter><Button onClick={handleCreateOrder}>Submit Order</Button></DialogFooter>
+
+         
         </DialogContent>
       </Dialog>
-
+    
       {/* Confirmation Dialog */}
       <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
         <DialogContent>
@@ -378,23 +537,38 @@ const PurchaseOrders = () => {
 
       {/* History Dialog */}
       <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader><DialogTitle>Confirmation History</DialogTitle></DialogHeader>
-          <Table>
-            <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Confirmed By</TableHead><TableHead>Quantity</TableHead><TableHead>Pending After</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {confirmHistory.map(h => (
-                <TableRow key={h.id}>
-                  <TableCell>{format(new Date(h.confirmed_at), 'PPP p')}</TableCell>
-                  <TableCell>{h.confirmed_by_name}</TableCell>
-                  <TableCell>{h.confirmed_quantity}</TableCell>
-                  <TableCell>{h.pending_after}</TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date & Time</TableHead>
+                  <TableHead>Confirmed By</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Pending After</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {confirmHistory.map(h => (
+                  <TableRow key={h.id}>
+                    <TableCell>{format(new Date(h.confirmed_at), 'PPP p')}</TableCell>
+                    <TableCell>{h.confirmed_by_name || 'System'}</TableCell>
+                    <TableCell>{h.confirmed_quantity}</TableCell>
+                    <TableCell>{h.pending_after}</TableCell>
+                  </TableRow>
+                ))}
+                {confirmHistory.length === 0 && (
+                  <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">No confirmations yet.</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setHistoryDialogOpen(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      
     </DashboardLayout>
   );
 };

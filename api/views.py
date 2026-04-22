@@ -1541,9 +1541,6 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_user_context(self, user):
-        """
-        Returns (user_type, role, dealer, company, employee)
-        """
         email = user.email
 
         emp = Employee.objects.filter(email=email).first()
@@ -1606,24 +1603,66 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 return Response({"detail": "Dealer does not belong to your company."},
                                 status=status.HTTP_403_FORBIDDEN)
 
-        serializer = PurchaseOrderCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        # ✅ MULTI ITEM SUPPORT
+        items = request.data.get('items', [])
+        if not items or not isinstance(items, list):
+            return Response({"detail": "items array is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        created_by_employee = employee if user_type == 'employee' else None
+        created_orders = []
+        errors = []
 
-        order = PurchaseOrder.objects.create(
-            dealer=order_dealer,
-            created_by=created_by_employee,
-            **serializer.validated_data
-        )
+        for idx, item_data in enumerate(items):
+            item_name = item_data.get('item_name')
+            item_code = item_data.get('item_code')
+            product_code = item_data.get('product_code', '')
+            order_quantity = item_data.get('order_quantity')
+            remarks = item_data.get('remarks', '')
 
-        return Response(PurchaseOrderSerializer(order).data, status=status.HTTP_201_CREATED)
+            if not item_name or not item_code or not order_quantity:
+                errors.append(f"Row {idx+1}: missing required fields.")
+                continue
+
+            try:
+                quantity = int(order_quantity)
+                if quantity <= 0:
+                    errors.append(f"Row {idx+1}: quantity must be positive.")
+                    continue
+            except ValueError:
+                errors.append(f"Row {idx+1}: invalid quantity.")
+                continue
+
+            serializer = PurchaseOrderCreateSerializer(data={
+                'item_name': item_name,
+                'item_code': item_code,
+                'product_code': product_code,
+                'order_quantity': quantity,
+                'remarks': remarks,
+            })
+
+            if not serializer.is_valid():
+                errors.append(f"Row {idx+1}: {serializer.errors}")
+                continue
+
+            order = PurchaseOrder.objects.create(
+                dealer=order_dealer,
+                created_by=employee if user_type == 'employee' else None,
+                **serializer.validated_data
+            )
+
+            created_orders.append(PurchaseOrderSerializer(order).data)
+
+        if errors:
+            return Response({
+                "partial_success": created_orders,
+                "errors": errors
+            }, status=207)
+
+        return Response(created_orders, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
         user_type, role, dealer, company, employee = self.get_user_context(request.user)
 
-        # Permission check
         allowed = False
         if user_type == 'employee' and role in ['COMPANY_ADMIN', 'COMPANY_EMPLOYEE', 'APPLICATION_ADMIN']:
             allowed = True
@@ -1651,7 +1690,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         confirmation = PurchaseOrderConfirmation.objects.create(
             purchase_order=order,
             confirmed_quantity=quantity,
-            confirmed_by=employee,  # can be None
+            confirmed_by=employee,
             pending_after=new_pending
         )
 
