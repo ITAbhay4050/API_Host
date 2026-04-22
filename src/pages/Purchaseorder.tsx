@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { format } from 'date-fns';
-import { Search, Plus, Download, Eye, Trash2, X } from 'lucide-react';
+import { Search, Plus, Download, Eye, Trash2, X, Calendar, FilterX } from 'lucide-react';
 import DashboardLayout from '../components/Layout/DashboardLayout';
 import { useAuth } from '../context/AuthContext';
 import { UserRole } from '../types';
@@ -49,13 +49,28 @@ const PurchaseOrders = () => {
   const isAdmin = useMemo(() => currentUser?.role === UserRole.APPLICATION_ADMIN, [currentUser]);
   const canCreateOrder = useMemo(() => isDealerUser || isCompanyUser || isAdmin, [isDealerUser, isCompanyUser, isAdmin]);
 
+  // Get dealer ID for dealer users
+  const dealerId = useMemo(() => {
+    if (isDealerUser && currentUser?.dealer_id) {
+      return currentUser.dealer_id;
+    }
+    return null;
+  }, [isDealerUser, currentUser]);
+
   // Orders listing state
   const [orders, setOrders] = useState<api.PurchaseOrder[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<api.PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterDealer, setFilterDealer] = useState<string>('all');
+  
+  // Filter states - common for all roles
+  const [itemNameFilter, setItemNameFilter] = useState('');
+  const [itemCodeFilter, setItemCodeFilter] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
+  
+  // Dealer filter - only for company/admin
+  const [filterDealer, setFilterDealer] = useState<string>('all');
   const [dealersList, setDealersList] = useState<{ id: number; name: string }[]>([]);
 
   // Create order modal state
@@ -95,12 +110,14 @@ const PurchaseOrders = () => {
   };
   useEffect(() => { loadOrders(); }, []);
 
+  // Load dealers list for company/admin users
   useEffect(() => {
     if ((isCompanyUser || isAdmin) && !availableDealers.length) {
       api.fetchDealers().then(setAvailableDealers).catch(console.error);
     }
   }, [isCompanyUser, isAdmin, availableDealers.length]);
 
+  // Build dealers list from orders for filter dropdown
   useEffect(() => {
     if ((isCompanyUser || isAdmin) && orders.length) {
       const unique = Array.from(new Map(orders.map(o => [o.dealer, { id: o.dealer, name: o.dealer_name }])).values());
@@ -108,18 +125,65 @@ const PurchaseOrders = () => {
     }
   }, [orders, isCompanyUser, isAdmin]);
 
-  // Filter orders
+  // Filter orders based on all criteria
   useEffect(() => {
     let filtered = [...orders];
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(o => o.dealer_name.toLowerCase().includes(term) || o.item_name.toLowerCase().includes(term));
+    
+    // For dealer users, restrict to their own dealer
+    if (isDealerUser && dealerId !== null) {
+      filtered = filtered.filter(o => o.dealer === dealerId);
     }
-    if (filterDealer !== 'all') filtered = filtered.filter(o => o.dealer.toString() === filterDealer);
-    if (filterStatus !== 'all') filtered = filtered.filter(o => o.status === filterStatus);
+    
+    // Filter by dealer (only for company/admin)
+    if ((isCompanyUser || isAdmin) && filterDealer !== 'all') {
+      filtered = filtered.filter(o => o.dealer.toString() === filterDealer);
+    }
+    
+    // Filter by item name (case-insensitive partial match)
+    if (itemNameFilter.trim()) {
+      const term = itemNameFilter.toLowerCase();
+      filtered = filtered.filter(o => o.item_name.toLowerCase().includes(term));
+    }
+    
+    // Filter by item code (case-insensitive partial match)
+    if (itemCodeFilter.trim()) {
+      const term = itemCodeFilter.toLowerCase();
+      filtered = filtered.filter(o => o.item_code.toLowerCase().includes(term));
+    }
+    
+    // Filter by status
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(o => o.status === filterStatus);
+    }
+    
+    // Filter by date range (order created_at)
+    if (fromDate) {
+      const fromDateTime = new Date(fromDate);
+      fromDateTime.setHours(0, 0, 0, 0);
+      filtered = filtered.filter(o => new Date(o.created_at) >= fromDateTime);
+    }
+    if (toDate) {
+      const toDateTime = new Date(toDate);
+      toDateTime.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(o => new Date(o.created_at) <= toDateTime);
+    }
+    
+    // Sort by created date descending
     filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     setFilteredOrders(filtered);
-  }, [orders, searchTerm, filterDealer, filterStatus]);
+  }, [orders, isDealerUser, dealerId, filterDealer, itemNameFilter, itemCodeFilter, filterStatus, fromDate, toDate, isCompanyUser, isAdmin]);
+
+  // Reset all filters
+  const resetFilters = () => {
+    setItemNameFilter('');
+    setItemCodeFilter('');
+    setFilterStatus('all');
+    setFromDate('');
+    setToDate('');
+    if ((isCompanyUser || isAdmin)) {
+      setFilterDealer('all');
+    }
+  };
 
   // Debounced item search (single search bar)
   const debouncedSearch = useMemo(
@@ -278,39 +342,119 @@ const PurchaseOrders = () => {
           </div>
         </div>
 
-        {/* Filters */}
-        {(isCompanyUser || isAdmin) && (
-          <Card>
-            <CardContent className="pt-6">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="relative">
-                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-                  <Input placeholder="Search dealer or item..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-8" />
-                </div>
+        {/* Filters Section - Enhanced for all roles */}
+        <Card>
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              {/* Item Name Filter */}
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                <Input 
+                  placeholder="Search by Item Name..." 
+                  value={itemNameFilter} 
+                  onChange={e => setItemNameFilter(e.target.value)} 
+                  className="pl-8" 
+                />
+              </div>
+              
+              {/* Item Code Filter */}
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                <Input 
+                  placeholder="Search by Item Code..." 
+                  value={itemCodeFilter} 
+                  onChange={e => setItemCodeFilter(e.target.value)} 
+                  className="pl-8" 
+                />
+              </div>
+              
+              {/* Status Filter */}
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="partially_completed">Partially Completed</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              {/* Dealer Filter - only for company/admin */}
+              {(isCompanyUser || isAdmin) && (
                 <Select value={filterDealer} onValueChange={setFilterDealer}>
-                  <SelectTrigger><SelectValue placeholder="All Dealers" /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Dealers" />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Dealers</SelectItem>
-                    {dealersList.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
+                    {dealersList.map(d => (
+                      <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger><SelectValue placeholder="All Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="partially_completed">Partially Completed</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                  </SelectContent>
-                </Select>
+              )}
+              
+              {/* If not company/admin, add an empty div to maintain grid */}
+              {!isCompanyUser && !isAdmin && <div></div>}
+            </div>
+            
+            {/* Date Range Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+              <div className="relative">
+                <Calendar className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                <Input 
+                  type="date" 
+                  value={fromDate} 
+                  onChange={e => setFromDate(e.target.value)} 
+                  className="pl-8"
+                  placeholder="From Date"
+                />
               </div>
-            </CardContent>
-          </Card>
-        )}
+              <div className="relative">
+                <Calendar className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                <Input 
+                  type="date" 
+                  value={toDate} 
+                  onChange={e => setToDate(e.target.value)} 
+                  className="pl-8"
+                  placeholder="To Date"
+                />
+              </div>
+              <div>
+                <Button variant="outline" onClick={resetFilters} className="w-full">
+                  <FilterX className="h-4 w-4 mr-2" /> Reset Filters
+                </Button>
+              </div>
+            </div>
+            
+            {/* Active filters summary */}
+            {(itemNameFilter || itemCodeFilter || filterStatus !== 'all' || fromDate || toDate || ((isCompanyUser || isAdmin) && filterDealer !== 'all')) && (
+              <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t">
+                <span className="text-sm text-gray-500">Active filters:</span>
+                {itemNameFilter && <Badge variant="secondary">Item: {itemNameFilter}</Badge>}
+                {itemCodeFilter && <Badge variant="secondary">Code: {itemCodeFilter}</Badge>}
+                {filterStatus !== 'all' && <Badge variant="secondary">Status: {filterStatus}</Badge>}
+                {(isCompanyUser || isAdmin) && filterDealer !== 'all' && (
+                  <Badge variant="secondary">Dealer: {dealersList.find(d => d.id.toString() === filterDealer)?.name || filterDealer}</Badge>
+                )}
+                {fromDate && <Badge variant="secondary">From: {fromDate}</Badge>}
+                {toDate && <Badge variant="secondary">To: {toDate}</Badge>}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Orders Table */}
         <Card>
-          <CardHeader><CardTitle>Orders</CardTitle><CardDescription>List of all purchase orders</CardDescription></CardHeader>
+          <CardHeader>
+            <CardTitle>Orders</CardTitle>
+            <CardDescription>
+              List of all purchase orders {isDealerUser && `for your dealership`}
+              {filteredOrders.length !== orders.length && ` (${filteredOrders.length} of ${orders.length} orders)`}
+            </CardDescription>
+          </CardHeader>
           <CardContent>
             {loading ? <div className="py-8 text-center">Loading...</div> : (
               <div className="overflow-x-auto">
@@ -338,7 +482,9 @@ const PurchaseOrders = () => {
                         <TableCell>{getStatusBadge(order.status)}</TableCell>
                         <TableCell>{format(new Date(order.created_at), 'PPP')}</TableCell>
                         <TableCell className="space-x-2 whitespace-nowrap">
-                          <Button size="sm" variant="outline" onClick={() => showHistory(order)}><Eye className="h-3 w-3 mr-1" /> History</Button>
+                          <Button size="sm" variant="outline" onClick={() => showHistory(order)}>
+                            <Eye className="h-3 w-3 mr-1" /> History
+                          </Button>
                           {(isCompanyUser || isAdmin) && order.status !== 'completed' && (
                             <Button size="sm" onClick={() => { setSelectedOrder(order); setConfirmQuantity(0); setConfirmDialogOpen(true); }}>
                               Confirm
@@ -348,7 +494,11 @@ const PurchaseOrders = () => {
                       </TableRow>
                     ))}
                     {filteredOrders.length === 0 && (
-                      <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No orders found.</TableCell></TableRow>
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center text-muted-foreground">
+                          No orders found. {!loading && (itemNameFilter || itemCodeFilter || filterStatus !== 'all' || fromDate || toDate || ((isCompanyUser || isAdmin) && filterDealer !== 'all')) ? 'Try adjusting your filters.' : ''}
+                        </TableCell>
+                      </TableRow>
                     )}
                   </TableBody>
                 </Table>
@@ -371,7 +521,9 @@ const PurchaseOrders = () => {
               <div className="w-full md:w-1/2">
                 <Label className="text-base font-semibold">Select Dealer *</Label>
                 <Select value={selectedDealerId?.toString()} onValueChange={(val) => setSelectedDealerId(parseInt(val))}>
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="Choose dealer" /></SelectTrigger>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Choose dealer" />
+                  </SelectTrigger>
                   <SelectContent>
                     {availableDealers.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
                   </SelectContent>
@@ -501,25 +653,20 @@ const PurchaseOrders = () => {
                               <Trash2 className="h-4 w-4 text-red-500" />
                             </Button>
                           </TableCell>
-                          
                         </TableRow>
-                        
                       ))}
-
                     </TableBody>
                   </Table>
                 </div>
               </div>
             )}
-              <div className="flex justify-end w-full gap-3">
+            <div className="flex justify-end w-full gap-3">
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
               <Button onClick={handleCreateOrder} className="bg-green-600 hover:bg-green-700">
                 Submit Order ({addedItems.length} items)
               </Button>
             </div>
           </div>
-
-         
         </DialogContent>
       </Dialog>
     
@@ -567,8 +714,6 @@ const PurchaseOrders = () => {
           <DialogFooter><Button variant="outline" onClick={() => setHistoryDialogOpen(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-
-      
     </DashboardLayout>
   );
 };
