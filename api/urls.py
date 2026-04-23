@@ -4,7 +4,7 @@ from . import views
 from .views import (
     DealerAvailableStockView,DealerStockAuditView,
     SaveDealerStockSelection,
-    RemoveDealerStockSelection,
+    RemoveDealerStockSelection,DashboardSummaryView,
     DealerMyStockView,DealerSoldStockView,
     CompanyDealerStockView,
     AddDealerStockByCompany,SellDealerStockView,ReturnDealerStockView,
@@ -68,5 +68,6 @@ urlpatterns = [
     path('purchase/orders/<int:pk>/confirm/', PurchaseOrderViewSet.as_view({'post': 'confirm'}), name='purchase-order-confirm'),
     path('purchase/', include(po_router.urls)),
     #path('api/purchase/', include('purchase_order.urls')),
+    path('dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard_summary'),
      
 ]
