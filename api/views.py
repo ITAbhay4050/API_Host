@@ -1724,6 +1724,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
 
 
+
 class DashboardSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1742,116 +1743,215 @@ class DashboardSummaryView(APIView):
 
         if employee:
             role = employee.role
+
             if role in ['COMPANY_ADMIN', 'COMPANY_EMPLOYEE']:
                 company_filter = employee.company
+
             elif role in ['DEALER_ADMIN', 'DEALER_EMPLOYEE']:
                 dealer_filter = employee.dealer
                 company_filter = employee.dealer.company if employee.dealer else None
+
         elif dealer:
             role = 'DEALER_ADMIN'
             dealer_filter = dealer
             company_filter = dealer.company
+
         elif company:
             role = 'COMPANY_ADMIN'
             company_filter = company
 
-        # Base querysets with role-based filtering
+        # Base Querysets
         tasks_qs = Task.objects.all()
         tickets_qs = ticket.objects.all()
         machines_qs = MachineInstallation.objects.all()
         dealers_qs = Dealer.objects.all()
         employees_qs = Employee.objects.all()
         companies_qs = Company.objects.all()
-        # Users list (for total users count)
-        users_list = list(Employee.objects.all()) + list(Dealer.objects.all()) + list(Company.objects.all())
 
+        # Users list
+        users_list = (
+            list(Employee.objects.all()) +
+            list(Dealer.objects.all()) +
+            list(Company.objects.all())
+        )
+
+        # Role-based filtering
         if role == 'APPLICATION_ADMIN':
-            pass  # full access
-        elif role in ('COMPANY_ADMIN', 'COMPANY_EMPLOYEE') and company_filter:
-            tasks_qs = tasks_qs.filter(Q(assigner=company_filter) | Q(assignee__company=company_filter))
-            tickets_qs = tickets_qs.filter(machine_installation__company=company_filter)
-            machines_qs = machines_qs.filter(company=company_filter)
-            dealers_qs = dealers_qs.filter(company=company_filter)
-            employees_qs = employees_qs.filter(company=company_filter)
-            companies_qs = companies_qs.filter(id=company_filter.id)
-        elif role in ('DEALER_ADMIN', 'DEALER_EMPLOYEE') and dealer_filter:
-            tasks_qs = tasks_qs.filter(assignee__dealer=dealer_filter)
-            tickets_qs = tickets_qs.filter(machine_installation__dealer=dealer_filter)
-            machines_qs = machines_qs.filter(dealer=dealer_filter)
-            dealers_qs = dealers_qs.filter(id=dealer_filter.id)
-            employees_qs = employees_qs.filter(dealer=dealer_filter)
-            companies_qs = companies_qs.filter(id=company_filter.id) if company_filter else companies_qs.none()
-        else:
-            return Response({"error": "Invalid or unsupported role"}, status=403)
+            pass
 
-        # ----- Counts -----
+        elif role in ('COMPANY_ADMIN', 'COMPANY_EMPLOYEE') and company_filter:
+
+            tasks_qs = tasks_qs.filter(
+                Q(assigner=company_filter) |
+                Q(assignee__company=company_filter)
+            )
+
+            tickets_qs = tickets_qs.filter(
+                machine_installation__company=company_filter
+            )
+
+            machines_qs = machines_qs.filter(
+                company=company_filter
+            )
+
+            dealers_qs = dealers_qs.filter(
+                company=company_filter
+            )
+
+            employees_qs = employees_qs.filter(
+                company=company_filter
+            )
+
+            companies_qs = companies_qs.filter(
+                id=company_filter.id
+            )
+
+        elif role in ('DEALER_ADMIN', 'DEALER_EMPLOYEE') and dealer_filter:
+
+            tasks_qs = tasks_qs.filter(
+                assignee__dealer=dealer_filter
+            )
+
+            tickets_qs = tickets_qs.filter(
+                machine_installation__dealer=dealer_filter
+            )
+
+            machines_qs = machines_qs.filter(
+                dealer=dealer_filter
+            )
+
+            dealers_qs = dealers_qs.filter(
+                id=dealer_filter.id
+            )
+
+            employees_qs = employees_qs.filter(
+                dealer=dealer_filter
+            )
+
+            companies_qs = (
+                companies_qs.filter(id=company_filter.id)
+                if company_filter else companies_qs.none()
+            )
+
+        else:
+            return Response(
+                {"error": "Invalid or unsupported role"},
+                status=403
+            )
+
+        # ================= COUNTS =================
+
         total_users = len(users_list)
         total_companies = companies_qs.count()
         total_dealers = dealers_qs.count()
         total_machines = machines_qs.count()
-        open_tickets = tickets_qs.filter(status__in=['open', 'in_progress']).count()
-        active_tasks = tasks_qs.exclude(status='completed').count()
 
-        # ----- Task status distribution -----
-        task_status_stats = tasks_qs.values('status').annotate(count=Count('id'))
+        open_tickets = tickets_qs.filter(
+            status__in=['open', 'in_progress']
+        ).count()
+
+        active_tasks = tasks_qs.exclude(
+            status='completed'
+        ).count()
+
+        # ================= TASK STATUS =================
+
+        task_status_stats = (
+            tasks_qs.order_by()
+            .values('status')
+            .annotate(count=Count('id'))
+        )
+
         status_map = {
             'pending': 'Pending',
             'in-progress': 'In Progress',
             'completed': 'Completed',
         }
+
         task_stats = [
-            {'name': status_map.get(item['status'], item['status']), 'count': item['count']}
-            for item in task_status_stats if item['status'] != 'cancelled'
+            {
+                'name': status_map.get(item['status'], item['status']),
+                'count': item['count']
+            }
+            for item in task_status_stats
+            if item['status'] != 'cancelled'
         ]
 
-        # ----- Ticket status distribution -----
-        ticket_status_stats = tickets_qs.values('status').annotate(count=Count('id'))
+        # ================= TICKET STATUS =================
+
+        ticket_status_stats = (
+            tickets_qs.order_by()
+            .values('status')
+            .annotate(count=Count('id'))
+        )
+
         ticket_stats = [
-            {'name': item['status'].replace('_', ' ').title(), 'count': item['count']}
+            {
+                'name': item['status'].replace('_', ' ').title(),
+                'count': item['count']
+            }
             for item in ticket_status_stats
         ]
 
-        # ----- Machine status (not available in model) -----
-        # Since MachineInstallation has no 'status' field, we return empty.
+        # ================= MACHINE STATUS =================
+
         machine_stats = []
 
-        # ----- Tasks per user (assignee) -----
+        # ================= TASKS PER USER =================
+
         tasks_per_user = (
-            tasks_qs.values('assignee__name')
+            tasks_qs.order_by()
+            .values('assignee__name')
             .annotate(count=Count('id'))
             .order_by('-count')[:10]
         )
+
         tasks_per_user_list = [
-            {'name': item['assignee__name'] or 'Unassigned', 'tasks': item['count']}
+            {
+                'name': item['assignee__name'] or 'Unassigned',
+                'tasks': item['count']
+            }
             for item in tasks_per_user
         ]
 
-        # ----- Tickets per user (assigned_to is GenericFK – skip for now) -----
-        tickets_per_user_list = []  # Can be implemented later with ContentType query
+        # ================= TICKETS PER USER =================
 
-        # ----- Machines per dealer -----
+        tickets_per_user_list = []
+
+        # ================= MACHINES PER DEALER =================
+
         machines_per_dealer = (
-            machines_qs.values('dealer__name')
+            machines_qs.order_by()
+            .values('dealer__name')
             .annotate(count=Count('id'))
             .order_by('-count')[:10]
         )
+
         machines_per_dealer_list = [
-            {'name': item['dealer__name'] or 'No Dealer', 'machines': item['count']}
+            {
+                'name': item['dealer__name'] or 'No Dealer',
+                'machines': item['count']
+            }
             for item in machines_per_dealer
         ]
 
-        # ----- Monthly trends (last 6 months) -----
+        # ================= MONTHLY TRENDS =================
+
         today = timezone.now()
         six_months_ago = today - timezone.timedelta(days=180)
+
         tasks_monthly = (
-            tasks_qs.filter(created_at__gte=six_months_ago)
+            tasks_qs.order_by()
+            .filter(created_at__gte=six_months_ago)
             .annotate(month=TruncMonth('created_at'))
             .values('month')
             .annotate(count=Count('id'))
             .order_by('month')
         )
+
         tickets_monthly = (
-            tickets_qs.filter(created_at__gte=six_months_ago)
+            tickets_qs.order_by()
+            .filter(created_at__gte=six_months_ago)
             .annotate(month=TruncMonth('created_at'))
             .values('month')
             .annotate(count=Count('id'))
@@ -1859,43 +1959,79 @@ class DashboardSummaryView(APIView):
         )
 
         monthly_tasks = [
-            {'month': item['month'].strftime('%b %Y'), 'count': item['count']}
+            {
+                'month': item['month'].strftime('%b %Y'),
+                'count': item['count']
+            }
             for item in tasks_monthly
         ]
+
         monthly_tickets = [
-            {'month': item['month'].strftime('%b %Y'), 'count': item['count']}
+            {
+                'month': item['month'].strftime('%b %Y'),
+                'count': item['count']
+            }
             for item in tickets_monthly
         ]
 
-        # ----- Top employee (most tasks completed) -----
+        # ================= TOP EMPLOYEE =================
+
         top_employee = (
-            tasks_qs.filter(status='completed')
+            tasks_qs.order_by()
+            .filter(status='completed')
             .values('assignee__name')
             .annotate(count=Count('id'))
             .order_by('-count')
             .first()
         )
+
         top_employee_data = {
-            'name': top_employee['assignee__name'] if top_employee else 'N/A',
-            'tasks_completed': top_employee['count'] if top_employee else 0
+            'name': top_employee['assignee__name']
+            if top_employee else 'N/A',
+
+            'tasks_completed': top_employee['count']
+            if top_employee else 0
         }
 
-        # ----- Top dealer (most machines handled) -----
+        # ================= TOP DEALER =================
+
         top_dealer = (
-            machines_qs.values('dealer__name')
+            machines_qs.order_by()
+            .values('dealer__name')
             .annotate(count=Count('id'))
             .order_by('-count')
             .first()
         )
+
         top_dealer_data = {
-            'name': top_dealer['dealer__name'] if top_dealer else 'N/A',
-            'machines_handled': top_dealer['count'] if top_dealer else 0
+            'name': top_dealer['dealer__name']
+            if top_dealer else 'N/A',
+
+            'machines_handled': top_dealer['count']
+            if top_dealer else 0
         }
 
-        # ----- Recent activity (latest 5 each) -----
-        recent_tickets = tickets_qs.order_by('-created_at')[:5].values('id', 'title', 'status', 'created_at')
-        recent_tasks = tasks_qs.order_by('-created_at')[:5].values('id', 'title', 'status', 'created_at')
-        recent_machines = machines_qs.order_by('-created_at')[:5].values('id', 'batch_number', 'created_at')
+        # ================= RECENT ACTIVITY =================
+
+        recent_tickets = (
+            tickets_qs
+            .values('id', 'title', 'status', 'created_at')
+            .order_by('-created_at')[:5]
+        )
+
+        recent_tasks = (
+            tasks_qs
+            .values('id', 'title', 'status', 'created_at')
+            .order_by('-created_at')[:5]
+        )
+
+        recent_machines = (
+            machines_qs
+            .values('id', 'batch_number', 'created_at')
+            .order_by('-created_at')[:5]
+        )
+
+        # ================= RESPONSE =================
 
         response_data = {
             'counts': {
@@ -1906,21 +2042,28 @@ class DashboardSummaryView(APIView):
                 'open_tickets': open_tickets,
                 'active_tasks': active_tasks,
             },
+
             'task_stats': task_stats,
             'ticket_stats': ticket_stats,
-            'machine_stats': machine_stats,          # empty – add status field later
+            'machine_stats': machine_stats,
+
             'tasks_per_user': tasks_per_user_list,
             'tickets_per_user': tickets_per_user_list,
             'machines_per_dealer': machines_per_dealer_list,
+
             'monthly_tasks': monthly_tasks,
             'monthly_tickets': monthly_tickets,
+
             'top_employee': top_employee_data,
             'top_dealer': top_dealer_data,
+
             'recent_activity': {
                 'tickets': list(recent_tickets),
                 'tasks': list(recent_tasks),
                 'installations': list(recent_machines),
             },
+
             'role': role,
         }
+
         return Response(response_data)
