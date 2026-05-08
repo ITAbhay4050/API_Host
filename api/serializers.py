@@ -12,7 +12,7 @@ from .models import DealerStockMaster, DealerStockAudit
 from django.db import connections
 
 from .models import (
-    Company,
+    Company,AccountMaster, ItemMaster,
     Dealer,
     MachineInstallation,
     InstallationPhoto,
@@ -574,3 +574,4 @@ class ItemMasterSerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemMaster
         fields = ['itemname', 'itemcode', 'productcode']
+

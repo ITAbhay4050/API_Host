@@ -127,6 +127,7 @@ DATABASES = {
             "driver": "ODBC Driver 17 for SQL Server",
         },
     },
+   
 }
 DATABASE_ROUTERS = [
     'api.db_routers.Munim006Router',
