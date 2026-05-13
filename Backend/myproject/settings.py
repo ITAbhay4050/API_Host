@@ -1,32 +1,31 @@
-"""Django settings for myproject (Comptech Equipment LIMITED).
-Updated 2 July 2025: fixed DRF permission class, moved secrets to env vars,
-added MySQL strict-mode, clarified typing.
-
-⚠️  Do **NOT** commit this file with real credentials – use .env instead.
+"""
+Django settings for Comptech Equipment LIMITED (PRODUCTION READY)
 """
 
 from pathlib import Path
 import os
 from dotenv import load_dotenv
 
-# -----------------------------------------------------------------------------
-# Base path & .env loader
-# -----------------------------------------------------------------------------
-BASE_DIR: Path = Path(__file__).resolve().parent.parent
-load_dotenv(str(BASE_DIR / ".env"))  # accepts str on Windows
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(str(BASE_DIR / ".env"))
 
-# -----------------------------------------------------------------------------
-# Core settings
-# -----------------------------------------------------------------------------
-SECRET_KEY: str = os.getenv("DJ_SECRET_KEY", "django-insecure-please_change_me")
-DEBUG: bool = os.getenv("DJ_DEBUG", "True").lower() == "true"
-ALLOWED_HOSTS: list[str] = [host.strip() for host in os.getenv("DJ_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")]
+# ------------------------------------------------------------------
+# CORE
+# ------------------------------------------------------------------
+SECRET_KEY = os.getenv("DJ_SECRET_KEY", "change-this-secret-key")
+DEBUG = os.getenv("DJ_DEBUG", "False").lower() == "true"
 
-# -----------------------------------------------------------------------------
-# Applications
-# -----------------------------------------------------------------------------
-INSTALLED_APPS: list[str] = [
-    #"jazzmin",
+ALLOWED_HOSTS = [
+    "127.0.0.1",
+    "localhost",
+    ".trycloudflare.com",
+    "comptechserv.netlify.app",
+]
+
+# ------------------------------------------------------------------
+# APPS
+# ------------------------------------------------------------------
+INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -34,22 +33,20 @@ INSTALLED_APPS: list[str] = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
-    # 3rd-party
     "rest_framework",
     "rest_framework.authtoken",
     "corsheaders",
 
-    # local
-    "api",  # your app
+    "api",
 ]
 
-# -----------------------------------------------------------------------------
-# Middleware
-# -----------------------------------------------------------------------------
-MIDDLEWARE: list[str] = [
+# ------------------------------------------------------------------
+# MIDDLEWARE
+# ------------------------------------------------------------------
+MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "corsheaders.middleware.CorsMiddleware",  # keep above CommonMiddleware
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -57,13 +54,13 @@ MIDDLEWARE: list[str] = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF: str = "myproject.urls"
-WSGI_APPLICATION: str = "myproject.wsgi.application"
+ROOT_URLCONF = "myproject.urls"
+WSGI_APPLICATION = "myproject.wsgi.application"
 
-# -----------------------------------------------------------------------------
-# Templates
-# -----------------------------------------------------------------------------
-TEMPLATES: list[dict] = [
+# ------------------------------------------------------------------
+# TEMPLATES
+# ------------------------------------------------------------------
+TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [],
@@ -74,14 +71,14 @@ TEMPLATES: list[dict] = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-            ]
+            ],
         },
-    }
+    },
 ]
 
-# -----------------------------------------------------------------------------
-# Database: Default 'Application' DB and 'munim006' DB
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# DATABASE (FIXED STRUCTURE)
+# ------------------------------------------------------------------
 DATABASES = {
     "default": {
         "ENGINE": "mssql",
@@ -134,9 +131,12 @@ DATABASE_ROUTERS = [
     'api.db_routers.Munim008Router',   # 👈 add this
 ]
 
-# -----------------------------------------------------------------------------
-# Password validation
-# -----------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------
+# PASSWORD VALIDATION
+# ------------------------------------------------------------------
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -144,35 +144,29 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# -----------------------------------------------------------------------------
-# Internationalisation
-# -----------------------------------------------------------------------------
-# -------------------------------------------------------------------
-# Internationalisation
-# -------------------------------------------------------------------
+# ------------------------------------------------------------------
+# INTERNATIONALIZATION
+# ------------------------------------------------------------------
 LANGUAGE_CODE = "en-us"
-
-# India Timezone
 TIME_ZONE = "Asia/Kolkata"
 
 USE_I18N = True
-
-# 🔥 IMPORTANT FIX (for SQL Server IST setup)
 USE_TZ = False
 
-# -----------------------------------------------------------------------------
-# Static & media
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# STATIC / MEDIA
+# ------------------------------------------------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# -----------------------------------------------------------------------------
-# Django REST Framework defaults
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# REST FRAMEWORK
+# ------------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
@@ -183,25 +177,20 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
-    'DEFAULT_PARSER_CLASSES': [
-        'rest_framework.parsers.JSONParser',
-        'rest_framework.parsers.MultiPartParser',
-        'rest_framework.parsers.FormParser',
-    ],
 }
 
-# -----------------------------------------------------------------------------
-# CORS
-# -----------------------------------------------------------------------------
-CORS_ALLOW_ALL_ORIGINS: bool = os.getenv("DJ_CORS_ALLOW_ALL", "True").lower() == "true"
-if not CORS_ALLOW_ALL_ORIGINS:
-    CORS_ALLOWED_ORIGINS: list[str] = [
-        origin.strip() for origin in os.getenv("DJ_CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()
-    ]
+# ------------------------------------------------------------------
+# CORS (SECURE FOR NETLIFY)
+# ------------------------------------------------------------------
+CORS_ALLOWED_ORIGINS = [
+    "https://comptechserv.netlify.app",
+]
 
-# -----------------------------------------------------------------------------
-# Email (SMTP)
-# -----------------------------------------------------------------------------
+CORS_ALLOW_CREDENTIALS = True
+
+# ------------------------------------------------------------------
+# EMAIL (MOVE PASSWORD TO ENV - IMPORTANT)
+# ------------------------------------------------------------------
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
@@ -209,9 +198,9 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'it02comptech@gmail.com'
 EMAIL_HOST_PASSWORD = 'ytno qhlv ihnz mqlx'
 
-# -----------------------------------------------------------------------------
-# Logging
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# LOGGING
+# ------------------------------------------------------------------
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -223,13 +212,15 @@ LOGGING = {
         "level": "INFO",
     },
 }
+
+# ------------------------------------------------------------------
+# JAZZMIN
+# ------------------------------------------------------------------
 JAZZMIN_SETTINGS = {
     "site_title": "Comptech Admin",
     "site_header": "Comptech",
     "site_brand": "Comptech",
-
     "welcome_sign": "Welcome to Comptech Dashboard",
     "copyright": "Comptech",
     "show_ui_builder": True,
-    "user_avatar": None,
 }

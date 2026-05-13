@@ -1,4 +1,3 @@
-// src/pages/Dealers.tsx
 import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
 import CreateDealerForm from "@/components/DealerManagement/CreateDealerForm";
@@ -44,15 +43,24 @@ import {
 import { Dealer, Company, UserRole, User } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 
+// ✅ FIX: SINGLE SOURCE OF TRUTH
+import API_BASE from "@/config/api";
+
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
 /* ------------------------------------------------------------------ */
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000/api";
 
-const makeAuthHeaders = (token?: string) =>
-  token
-    ? { Authorization: `Token ${token}`, "Content-Type": "application/json" }
-    : { "Content-Type": "application/json" };
+const makeAuthHeaders = (token?: string): HeadersInit => {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+  };
+
+  if (token) {
+    (headers as Record<string, string>).Authorization = `Token ${token}`;
+  }
+
+  return headers;
+};
 
 const normaliseDealer = (d: any): Dealer => ({
   id: String(d.id),
@@ -76,6 +84,7 @@ const normaliseCompany = (c: any): Company => ({
 /* ------------------------------------------------------------------ */
 /* Component                                                          */
 /* ------------------------------------------------------------------ */
+
 const Dealers = () => {
   const { user } = useAuth();
   const token = user?.token;
@@ -95,11 +104,14 @@ const Dealers = () => {
       const dRes = await fetch(`${API_BASE}/dealers/`, {
         headers: makeAuthHeaders(token),
       });
+
       if (!dRes.ok) throw new Error("Could not fetch dealers");
+
       const dJson = await dRes.json();
       const dealersNorm: Dealer[] = dJson.map(normaliseDealer);
 
       let companiesNorm: Company[] = [];
+
       if (
         user?.role === UserRole.APPLICATION_ADMIN ||
         user?.role === UserRole.COMPANY_ADMIN
@@ -107,7 +119,9 @@ const Dealers = () => {
         const cRes = await fetch(`${API_BASE}/companies/`, {
           headers: makeAuthHeaders(token),
         });
+
         if (!cRes.ok) throw new Error("Could not fetch companies");
+
         const cJson = await cRes.json();
         companiesNorm = cJson.map(normaliseCompany);
       }
@@ -129,7 +143,7 @@ const Dealers = () => {
     .filter((d) =>
       user?.role === UserRole.COMPANY_ADMIN && user.companyId
         ? d.companyId === user.companyId
-        : true,
+        : true
     )
     .filter((d) => {
       const t = searchTerm.toLowerCase();
@@ -151,7 +165,7 @@ const Dealers = () => {
   const dealerCountForCompany = (cid: string) =>
     dealers.filter((d) => d.companyId === cid).length;
 
-  const handleDealerCreated = (newDealer: Dealer, _admin: User) => {
+  const handleDealerCreated = (newDealer: Dealer) => {
     setDealers((prev) => [...prev, newDealer]);
     setIsAddDialogOpen(false);
   };
@@ -162,12 +176,15 @@ const Dealers = () => {
         method: "DELETE",
         headers: makeAuthHeaders(token),
       });
+
       if (!res.ok) throw new Error("Delete failed");
+
       setDealers((prev) => prev.filter((d) => d.id !== id));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     }
   };
+
 
   if (loading) {
     return (

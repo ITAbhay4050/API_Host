@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { UserRole } from "@/types";
+import API_BASE from "@/config/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -76,25 +77,36 @@ export default function Dashboard() {
 
   // Fetch dashboard data
   useEffect(() => {
-    if (!token) return;
-    const fetchSummary = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("http://127.0.0.1:8000/api/dashboard/summary/", {
-          headers: { Authorization: `Token ${token}` },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setSummary(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchSummary();
-  }, [token]);
+  if (!token) return;
 
+  const fetchSummary = async () => {
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/dashboard/summary/`, {
+        headers: {
+          Authorization: `Token ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      setSummary(data);
+
+    } catch (err: any) {
+      setError(err.message);
+
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchSummary();
+
+}, [token]);
   // Dark mode toggle
   useEffect(() => {
     if (darkMode) {

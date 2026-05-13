@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { useAuth } from "@/context/AuthContext";
 import React from "react"; // Import React for React.Fragment
+import API_BASE from "@/config/api";
 
 import {
   Card,
@@ -59,12 +60,19 @@ import { toast } from "@/components/ui/use-toast";
 /* ------------------------------------------------------------------ */
 /* ENV / HELPERS                                                      */
 /* ------------------------------------------------------------------ */
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000/api";
-const makeAuthHeaders = (token?: string) =>
-  token
-    ? { Authorization: `Token ${token}`, "Content-Type": "application/json" }
-    : { "Content-Type": "application/json" };
+import { apiClient } from "@/services/api";
 
+const makeAuthHeaders = (token?: string) => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (token) {
+    headers.Authorization = `Token ${token}`; // or Bearer
+  }
+
+  return headers;
+};
 const normaliseDealer = (d: any): Dealer => ({
   id: String(d.id),
   companyId: String(d.company),
@@ -295,31 +303,32 @@ const UsersPage = () => {
   // Effect to set companyId for COMPANY_ADMIN when the dialog opens or user changes
   useEffect(() => {
     if (user?.role === UserRole.COMPANY_ADMIN && user.companyId) {
-      setNewUser((prev) => ({
-        ...prev,
-        companyId: user.companyId,
-        // If the company admin is setting a dealer-related role, and they already have a companyId
-        // we might need to ensure the dealer selection is also within that company.
-        // The DealerSearch component's filtering will handle this, but the initial state
-        // should reflect the company admin's context.
-      }));
-    } else if (user?.role === UserRole.DEALER_ADMIN && user.dealerId) {
-      // If dealer admin, pre-fill dealerId and infer companyId
-      const associatedDealer = dealers.find(d => d.id === user.dealerId);
-      setNewUser((prev) => ({
-        ...prev,
-        dealerId: user.dealerId,
-        companyId: associatedDealer?.companyId,
-      }));
-    } else {
-      // For Application Admin or other roles, reset company/dealer selection
-      setNewUser((prev) => ({
-        ...prev,
-        companyId: undefined,
-        dealerId: undefined,
-      }));
-    }
-  }, [user, dealers, isAddDialogOpen]); // Added isAddDialogOpen to re-evaluate on dialog open
+  setNewUser(prev => ({
+    ...prev,
+    companyId: user.companyId,
+  }));
+} else if (user?.role === UserRole.DEALER_ADMIN && user.dealerId) {
+  const associatedDealer = dealers.find(d => d.id === user.dealerId);
+
+  setNewUser(prev => ({
+    ...prev,
+    dealerId: user.dealerId,
+    companyId: associatedDealer?.companyId,
+  }));
+} else {
+  setNewUser(prev => ({
+    ...prev,
+    companyId: undefined,
+    dealerId: undefined,
+  }));
+}
+ }, [
+  user?.role,
+  user?.companyId,
+  user?.dealerId,
+  dealers,
+  isAddDialogOpen
+]);// Added isAddDialogOpen to re-evaluate on dialog open
 
   /* ---------------------------- LOAD DATA ------------------------ */
   const loadCompanies = useCallback(async () => {
@@ -367,9 +376,10 @@ const UsersPage = () => {
       return []; // Return empty array on error
     }
   }, [token]);
+const loadUsers = useCallback(
+  async (currentDealers: Dealer[], currentCompanies: Company[]) => {
+    setIsTableLoading(true);
 
-  const loadUsers = useCallback(async (currentDealers: Dealer[], currentCompanies: Company[]) => { // Accept dealers and companies as arguments
-    setIsTableLoading(true); // Set table loading state
     try {
       const res = await fetch(`${API_BASE}/register/employee/`, {
         headers: makeAuthHeaders(token),
@@ -379,31 +389,38 @@ const UsersPage = () => {
         throw new Error("Failed to fetch employees");
       }
 
-      const json = await res.json();
-      const allUsers = json.map(normaliseEmployee);
+      const json: any[] = await res.json();
+
+      const allUsers: User[] = json.map(normaliseEmployee);
 
       let filtered: User[] = [];
 
+      // ---------------- COMPANY ADMIN ----------------
       if (user?.role === UserRole.COMPANY_ADMIN && user.companyId) {
-        // Get all dealer IDs belonging to the current user's company
-        const dealerIdsOfCompany = currentDealers
+        const dealerIdsOfCompany: string[] = currentDealers
           .filter((d) => d.companyId === user.companyId)
           .map((d) => d.id);
 
-        filtered = allUsers.filter((u) => {
-          return (
-            // User belongs to the current company directly
-            u.companyId === user.companyId ||
-            // User is a dealer employee/admin and their dealer belongs to the current company
-            (u.dealerId && dealerIdsOfCompany.includes(u.dealerId))
-          );
+        filtered = allUsers.filter((u: User) => {
+          const belongsToCompany = u.companyId === user.companyId;
+
+          const belongsToDealer =
+            !!u.dealerId && dealerIdsOfCompany.includes(u.dealerId);
+
+          return belongsToCompany || belongsToDealer;
         });
-      } else if (user?.role === UserRole.DEALER_ADMIN && user.dealerId) {
+      }
+
+      // ---------------- DEALER ADMIN ----------------
+      else if (user?.role === UserRole.DEALER_ADMIN && user.dealerId) {
         filtered = allUsers.filter(
-          (u) => u.dealerId === user.dealerId
+          (u: User) => u.dealerId === user.dealerId
         );
-      } else {
-        filtered = allUsers; // System Admin or others see everything
+      }
+
+      // ---------------- SYSTEM ADMIN ----------------
+      else {
+        filtered = allUsers;
       }
 
       setUsers(filtered);
@@ -413,11 +430,14 @@ const UsersPage = () => {
         description: "Failed to load employees",
         variant: "destructive",
       });
+
       console.error("Error loading employees:", error);
     } finally {
-      setIsTableLoading(false); // Reset table loading state
+      setIsTableLoading(false);
     }
-  }, [token, user]);
+  },
+  [token, user]
+);
 
   useEffect(() => {
     const fetchData = async () => {

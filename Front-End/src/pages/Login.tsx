@@ -72,18 +72,19 @@ const Login = () => {
       return;
     }
 
-    setIsSubmitting(true);
-    const ok = await login(email, password);
-    setIsSubmitting(false);
+   const result = await login(email, password);
+setIsSubmitting(false);
 
-    if (ok) {
-      showToast("Login Successful", "Welcome back!");
-      navigate("/dashboard");
-    } else {
-      showToast("Login Failed", "Invalid credentials", "destructive");
-    }
-  };
-
+if (result.success) {
+  showToast("Login Successful", "Welcome back!");
+  navigate("/dashboard");
+} else {
+  showToast(
+    "Login Failed",
+    result.error || "Invalid credentials",
+    "destructive"
+  );
+}}
   /* ---------- quick‑fill demo creds ---------- */
   const fillCredentials = (preset: string) => {
     switch (preset) {

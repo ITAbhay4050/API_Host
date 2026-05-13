@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import API_BASE from "@/config/api";
 import { Input } from '@/components/ui/input';
 import {
   Card,
@@ -56,27 +57,26 @@ const Register = () => {
     }
 
     setIsSubmitting(true);
+try {
+  const response = await fetch(`${API_BASE}/register/company/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: formData.name,
+      address: formData.address,
+      city: formData.city,
+      state: formData.state,
+      country: formData.country,
+      pin_code: formData.pin_code,
+      phone: formData.phone,
+      email: formData.email,
+      gst_no: formData.gst_no,
+      pan_no: formData.pan_no,
+      password: formData.newPassword,
+    }),
+  });
 
-    try {
-      const response = await fetch('http://127.0.0.1:8000/api/register/company/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formData.name,
-          address: formData.address,
-          city: formData.city,
-          state: formData.state,
-          country: formData.country,
-          pin_code: formData.pin_code,
-          phone: formData.phone,
-          email: formData.email,
-          gst_no: formData.gst_no,
-          pan_no: formData.pan_no,
-          password: formData.newPassword,
-        }),
-      });
-
-      const data = await response.json();
+  const data = await response.json();
 
       if (response.ok) {
         toast({

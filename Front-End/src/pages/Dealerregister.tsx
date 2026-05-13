@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import API_BASE from "@/config/api";
 import { Input } from '@/components/ui/input';
 import {
   Card,
@@ -49,24 +50,37 @@ const DealerRegister = () => {
   const [isPanNoEditable, setIsPanNoEditable] = useState(true);
 
   // Fetch companies
-  useEffect(() => {
-    fetch('http://127.0.0.1:8000/api/companies/')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setCompanies(data);
-        } else {
-          setCompanies([]);
-        }
-      })
-      .catch(() =>
-        toast({
-          title: 'Error',
-          description: 'Failed to load company list.',
-          variant: 'destructive',
-        })
-      );
-  }, []);
+useEffect(() => {
+
+  fetch(`${API_BASE}/companies/`)
+    .then((res) => res.json())
+
+    .then((data) => {
+
+      if (Array.isArray(data)) {
+        setCompanies(data);
+
+      } else {
+        setCompanies([]);
+      }
+
+    })
+
+    .catch((err) => {
+
+      console.error("Company fetch error:", err);
+
+      setCompanies([]);
+
+      toast({
+        title: 'Error',
+        description: 'Failed to load company list.',
+        variant: 'destructive',
+      });
+
+    });
+
+}, []);
 
   // Fade-in animation
   useEffect(() => {
@@ -94,9 +108,10 @@ const DealerRegister = () => {
     }
 
     setIsLoading(true);
+   
     try {
       const res = await fetch(
-        `http://127.0.0.1:8000/api/party/get-details-by-gst/?gst_no=${formData.gst_no}`
+        `${API_BASE}/party/get-details-by-gst/?gst_no=${formData.gst_no}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -146,12 +161,11 @@ const DealerRegister = () => {
     }
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/send-otp/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(`${API_BASE}/send-otp/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: formData.email }),
       });
-
       if (res.ok) {
         setTempDealerData(formData);
         setShowOtp(true);
@@ -175,53 +189,59 @@ const DealerRegister = () => {
     }
   };
 
-  const handleVerifyOtp = async () => {
+   const handleVerifyOtp = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/verify-otp/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: tempDealerData?.email, otp }),
+      const verifyRes = await fetch(`${API_BASE}/verify-otp/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: tempDealerData?.email,
+          otp,
+        }),
       });
 
-      if (res.ok) {
-        const registerRes = await fetch('http://127.0.0.1:8000/api/dealers/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...tempDealerData,
-            password: tempDealerData?.newPassword,
-          }),
+      const verifyData = await verifyRes.json();
+
+      if (!verifyRes.ok) {
+        toast({
+          title: "Invalid OTP",
+          description: verifyData.error || "OTP failed",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // REGISTER DEALER
+      const registerRes = await fetch(`${API_BASE}/dealers/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...tempDealerData,
+          password: tempDealerData?.newPassword,
+        }),
+      });
+
+      const registerData = await registerRes.json();
+
+      if (registerRes.ok) {
+        toast({
+          title: "Success",
+          description: "Dealer registered successfully",
         });
 
-        if (registerRes.ok) {
-          toast({
-            title: 'Success',
-            description: 'Dealer registered successfully!',
-          });
-          setTimeout(() => navigate('/login'), 2000);
-        } else {
-          const errorData = await registerRes.json();
-          const errorMessage = errorData.detail || errorData.email || 'Dealer registration failed.';
-          toast({
-            title: 'Error',
-            description: errorMessage,
-            variant: 'destructive',
-          });
-        }
+        setTimeout(() => navigate("/login"), 2000);
       } else {
-        const errorData = await res.json();
-        const errorMessage = errorData.detail || 'OTP verification failed.';
         toast({
-          title: 'Invalid OTP',
-          description: errorMessage,
-          variant: 'destructive',
+          title: "Error",
+          description: registerData.detail || "Registration failed",
+          variant: "destructive",
         });
       }
     } catch {
       toast({
-        title: 'Error',
-        description: 'Failed to verify OTP or network error during registration.',
-        variant: 'destructive',
+        title: "Error",
+        description: "Network error",
+        variant: "destructive",
       });
     }
   };
