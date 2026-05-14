@@ -121,7 +121,7 @@ DATABASES = {
     },
      "munim010_db": {
         "ENGINE": "mssql",
-        "NAME": "Munim006",
+        "NAME": "Munim010",
         "USER": "sa",
         "PASSWORD": "nipl@12345",
         "HOST": "192.168.1.4",
