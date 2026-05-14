@@ -1,5 +1,5 @@
 # views.py (final, fully corrected)
-from rest_framework import status, permissions, serializers, viewsets, generics,permissions
+from rest_framework import status, serializers, viewsets, generics, permissions
 from rest_framework.authentication import TokenAuthentication
 from django.db.models.functions import TruncMonth
 from rest_framework.decorators import api_view, parser_classes, permission_classes, action
@@ -36,6 +36,9 @@ from .serializers import (
 )
 from .utils import generate_otp, send_otp_email
 from api.permissions import IsDealerUser, IsCompanyUser, IsSystemAdmin
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+import json
 
 # -------------------------------------------------------------------
 # Helper – create dummy auth_user for DRF Token
@@ -159,78 +162,64 @@ class VerifyOTPView(APIView):
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
-    def _issue_token(self, email: str) -> str:
-        token, _ = Token.objects.get_or_create(user=get_or_create_auth_user(email))
+    def _issue_token(self, email: str):
+        user = get_or_create_auth_user(email)
+        token, _ = Token.objects.get_or_create(user=user)
         return token.key
 
     def post(self, request):
         email = (request.data.get("email") or "").lower().strip()
         password = request.data.get("password") or ""
 
-        # Employee
+        if not email or not password:
+            return Response({"message": "Email & password required"}, status=400)
+
+        # EMPLOYEE
         emp = Employee.objects.filter(email=email).first()
-        if emp:
-            if check_password(password, emp.password):
-                if emp.company:
-                    company_name = emp.company.name
-                elif emp.dealer and emp.dealer.company:
-                    company_name = emp.dealer.company.name
-                else:
-                    company_name = None
+        if emp and check_password(password, emp.password):
+            LoginRecord.objects.create(email=email, user_type="employee", success=True)
 
-                LoginRecord.objects.create(email=email, user_type="employee", success=True)
-                return Response({
-                    "message": "Login successful",
-                    "token": self._issue_token(email),
-                    "user_type": "employee",
-                    "employee_id": emp.id,
-                    "name": emp.name,
-                    "role": emp.role,
-                    "company_id": emp.company_id,
-                    "dealer_id": emp.dealer_id,
-                    "company_name": company_name,
-                }, status=status.HTTP_200_OK)
-            LoginRecord.objects.create(email=email, user_type="employee", success=False)
-            return Response({"message": "Invalid password"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({
+                "message": "Login successful",
+                "token": self._issue_token(email),
+                "user_type": "employee",
+                "employee_id": emp.id,
+                "name": emp.name,
+                "role": emp.role,
+                "company_id": emp.company_id,
+                "dealer_id": emp.dealer_id,
+            })
 
-        # Dealer
+        # DEALER
         dealer = Dealer.objects.filter(email=email).first()
-        if dealer:
-            if check_password(password, dealer.password):
-                company_name = dealer.company.name if dealer.company else None
-                LoginRecord.objects.create(email=email, user_type="dealer", success=True)
-                return Response({
-                    "message": "Login successful",
-                    "token": self._issue_token(email),
-                    "user_type": "dealer",
-                    "dealer_id": dealer.id,
-                    "company_id": dealer.company_id,
-                    "name": dealer.name,
-                    "role": "DEALER_ADMIN",
-                    "company_name": company_name,
-                }, status=status.HTTP_200_OK)
-            LoginRecord.objects.create(email=email, user_type="dealer", success=False)
-            return Response({"message": "Invalid password"}, status=status.HTTP_401_UNAUTHORIZED)
+        if dealer and check_password(password, dealer.password):
+            LoginRecord.objects.create(email=email, user_type="dealer", success=True)
 
-        # Company
+            return Response({
+                "message": "Login successful",
+                "token": self._issue_token(email),
+                "user_type": "dealer",
+                "dealer_id": dealer.id,
+                "company_id": dealer.company_id,
+                "name": dealer.name,
+                "role": "DEALER_ADMIN",
+            })
+
+        # COMPANY
         company = Company.objects.filter(email=email).first()
-        if company:
-            if check_password(password, company.password):
-                LoginRecord.objects.create(email=email, user_type="company", success=True)
-                return Response({
-                    "message": "Login successful",
-                    "token": self._issue_token(email),
-                    "user_type": "company",
-                    "company_id": company.id,
-                    "name": company.name,
-                    "role": "COMPANY_ADMIN",
-                    "company_name": company.name,
-                }, status=status.HTTP_200_OK)
-            LoginRecord.objects.create(email=email, user_type="company", success=False)
-            return Response({"message": "Invalid password"}, status=status.HTTP_401_UNAUTHORIZED)
+        if company and check_password(password, company.password):
+            LoginRecord.objects.create(email=email, user_type="company", success=True)
 
-        return Response({"message": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "message": "Login successful",
+                "token": self._issue_token(email),
+                "user_type": "company",
+                "company_id": company.id,
+                "name": company.name,
+                "role": "COMPANY_ADMIN",
+            })
 
+        return Response({"message": "Invalid credentials"}, status=401)
 
 # -------------------------------------------------------------------
 # Employee CRUD

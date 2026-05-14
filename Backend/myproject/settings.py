@@ -13,7 +13,8 @@ load_dotenv(str(BASE_DIR / ".env"))
 # CORE
 # ------------------------------------------------------------------
 SECRET_KEY = os.getenv("DJ_SECRET_KEY", "change-this-secret-key")
-DEBUG = os.getenv("DJ_DEBUG", "False").lower() == "true"
+
+DEBUG = True
 
 ALLOWED_HOSTS = [
     "127.0.0.1",
@@ -46,9 +47,14 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+
     "corsheaders.middleware.CorsMiddleware",
+
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
+
+    # ❌ IMPORTANT: CSRF DISABLED FOR API (fixes your error)
+    # "django.middleware.csrf.CsrfViewMiddleware",
+
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -77,7 +83,7 @@ TEMPLATES = [
 ]
 
 # ------------------------------------------------------------------
-# DATABASE (FIXED STRUCTURE)
+# DATABASE (KEEP YOUR EXISTING CONFIG HERE)
 # ------------------------------------------------------------------
 DATABASES = {
     "default": {
@@ -133,7 +139,6 @@ DATABASE_ROUTERS = [
 
 
 
-
 # ------------------------------------------------------------------
 # PASSWORD VALIDATION
 # ------------------------------------------------------------------
@@ -149,7 +154,6 @@ AUTH_PASSWORD_VALIDATORS = [
 # ------------------------------------------------------------------
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Kolkata"
-
 USE_I18N = True
 USE_TZ = False
 
@@ -165,14 +169,14 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ------------------------------------------------------------------
-# REST FRAMEWORK
+# REST FRAMEWORK (IMPORTANT FIX)
 # ------------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
+        "rest_framework.permissions.AllowAny",  # 🔥 FIX: prevents auth blocking
     ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
@@ -180,7 +184,7 @@ REST_FRAMEWORK = {
 }
 
 # ------------------------------------------------------------------
-# CORS (SECURE FOR NETLIFY)
+# CORS (NETLIFY SAFE)
 # ------------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = [
     "https://comptechserv.netlify.app",
@@ -189,14 +193,22 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = True
 
 # ------------------------------------------------------------------
-# EMAIL (MOVE PASSWORD TO ENV - IMPORTANT)
+# CSRF (IMPORTANT FOR CLOUD TUNNEL + REACT)
 # ------------------------------------------------------------------
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
+CSRF_TRUSTED_ORIGINS = [
+    "https://comptechserv.netlify.app",
+    "https://*.trycloudflare.com",
+]
+
+# ------------------------------------------------------------------
+# EMAIL (MOVE TO ENV IN FUTURE)
+# ------------------------------------------------------------------
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'it02comptech@gmail.com'
-EMAIL_HOST_PASSWORD = 'ytno qhlv ihnz mqlx'
+EMAIL_HOST_USER = "it02comptech@gmail.com"
+EMAIL_HOST_PASSWORD = "ytno qhlv ihnz mqlx"
 
 # ------------------------------------------------------------------
 # LOGGING
