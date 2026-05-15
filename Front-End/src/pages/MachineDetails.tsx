@@ -25,8 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
-const API_URL = API_BASE.endsWith("/") ? API_BASE.slice(0, -1) : API_BASE;
+import API_URL from "@/config/api";
 
 interface ServiceHistory {
   id: string;
